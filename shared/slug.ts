@@ -1,5 +1,3 @@
-import { randomBytes } from "node:crypto";
-
 export const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 
 const SLUG_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -15,7 +13,8 @@ export function slugify(title: string): string {
 }
 
 function randomSlugSuffix(): string {
-  const bytes = randomBytes(4);
+  const bytes = new Uint8Array(4);
+  globalThis.crypto.getRandomValues(bytes);
   let out = "";
   for (const byte of bytes) {
     const char = SLUG_ALPHABET[byte % SLUG_ALPHABET.length];

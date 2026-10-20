@@ -5,6 +5,26 @@ import { createApp } from "./app";
 import { openDb } from "./db/index";
 import { log } from "./log";
 
+function readCode(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null || !("code" in value)) return undefined;
+  return typeof value.code === "string" ? value.code : undefined;
+}
+
+function readCauseCode(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null || !("cause" in value)) return undefined;
+  return readCode(value.cause);
+}
+
+function startupFields(err: unknown): Record<string, string> | undefined {
+  const fields: Record<string, string> = {};
+  const code = readCode(err);
+  const causeCode = readCauseCode(err);
+  if (code !== undefined) fields.code = code;
+  if (causeCode !== undefined) fields.causeCode = causeCode;
+  if (Object.keys(fields).length === 0) return undefined;
+  return fields;
+}
+
 async function mountClient(app: express.Express, nodeEnv: "development" | "production" | "test"): Promise<void> {
   if (nodeEnv === "development") {
     const vite = await import("vite");
@@ -57,7 +77,20 @@ async function main(): Promise<void> {
   const app = createApp({ config, db });
   await mountClient(app, config.nodeEnv);
 
-  const server = app.listen(config.port, config.host, () => {
+  const server = app.listen(config.port, config.host, (err?: Error) => {
+    if (err) {
+      const code = readCode(err);
+      log.error("listen_failed", code === undefined ? undefined : { code });
+      void db.close().then(
+        () => {
+          process.exit(1);
+        },
+        () => {
+          process.exit(1);
+        },
+      );
+      return;
+    }
     log.info("listening", { url: `http://${config.host}:${config.port}` });
   });
 
@@ -82,6 +115,6 @@ async function main(): Promise<void> {
 
 main().catch((err: unknown) => {
   const message = err instanceof Error ? err.message : "server failed to start";
-  log.error(message);
+  log.error(message, startupFields(err));
   process.exit(1);
 });

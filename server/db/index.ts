@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle as drizzlePg, type NodePgDatabase } from "drizzle-orm/node-postgres";
@@ -74,6 +74,7 @@ export async function openDb(opts: OpenDbOptions): Promise<DbHandle> {
   }
 
   const dir = path.resolve(opts.dataDir, "pglite");
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
   return openPglite(dir, migrationsFolder);
 }

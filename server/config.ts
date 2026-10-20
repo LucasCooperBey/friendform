@@ -133,7 +133,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (adminPassword === "") {
     problems.push("ADMIN_PASSWORD is missing. Set it to at least 12 characters, or run bun run setup.");
   } else if (adminPassword.length < 12) {
-    problems.push("ADMIN_PASSWORD must be at least 12 characters. Run bun run setup.");
+    problems.push(
+      "ADMIN_PASSWORD must be at least 12 characters. Set a longer value, or run bun run setup --force to replace the password and the session secret.",
+    );
   }
 
   const sessionSecret = env.SESSION_SECRET ?? "";

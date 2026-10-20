@@ -114,6 +114,14 @@ describe("evaluateCondition", () => {
     expect(evaluateCondition({ enabled: true, questionId: "n", operator: "is_empty" }, { n: [] })).toBe(true);
     expect(evaluateCondition({ enabled: true, questionId: "n", operator: "is_empty" }, {})).toBe(true);
   });
+
+  it("treats an unanswered constructor question as empty", () => {
+    // source: is_not_empty is false and is_empty is true when constructor is not an own answer
+    expect(
+      evaluateCondition({ enabled: true, questionId: "constructor", operator: "is_not_empty" }, {}),
+    ).toBe(false);
+    expect(evaluateCondition({ enabled: true, questionId: "constructor", operator: "is_empty" }, {})).toBe(true);
+  });
 });
 
 describe("visibleQuestionIds", () => {

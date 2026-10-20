@@ -59,6 +59,9 @@ describe("loadConfig", () => {
     expect(message).toContain("PUBLIC_URL");
     expect(message).toContain("DATABASE_URL");
     expect(message).toContain("ADMIN_PASSWORD");
+    expect(message).toContain(
+      "ADMIN_PASSWORD must be at least 12 characters. Set a longer value, or run bun run setup --force to replace the password and the session secret.",
+    );
     expect(message).toContain("SESSION_SECRET");
     expect(message).toContain("Run bun run setup.");
   });
@@ -80,6 +83,31 @@ describe("loadConfig", () => {
     expect(messageOf(validEnv({ TRUST_PROXY: "11" }))).toContain("TRUST_PROXY");
     expect(messageOf(validEnv({ TRUST_PROXY: "0" }))).toContain("TRUST_PROXY");
     expect(messageOf(validEnv({ TRUST_PROXY: "not-a-host" }))).toContain("TRUST_PROXY");
+  });
+
+  it("rejects TRUST_PROXY=true with its dedicated message", () => {
+    // source: TRUST_PROXY=true returns its dedicated message text
+    expect(messageOf(validEnv({ TRUST_PROXY: "true" }))).toBe(
+      'TRUST_PROXY cannot be "true" because trusting every hop lets any visitor fake their address. Use 1 for a single reverse proxy or tunnel.\nRun bun run setup.',
+    );
+  });
+
+  it("treats an empty string as unset for the boot-check variables", () => {
+    // source: loadConfig treats "" as unset for DATABASE_URL, AI settings, TRUST_PROXY, PUBLIC_URL, and WEBHOOK_SECRET
+    expect(
+      loadConfig(
+        validEnv({
+          DATABASE_URL: "",
+          AI_BASE_URL: "",
+          AI_API_KEY: "",
+          AI_MODEL: "",
+          TEST_DATABASE_URL: "",
+          TRUST_PROXY: "",
+          PUBLIC_URL: "",
+          WEBHOOK_SECRET: "",
+        }),
+      ),
+    ).toEqual(loadConfig(validEnv()));
   });
 
   it("keeps optional AI settings and a postgres URL", () => {

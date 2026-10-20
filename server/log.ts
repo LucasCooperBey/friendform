@@ -1,6 +1,7 @@
 function write(stream: NodeJS.WriteStream, level: string, msg: string, extra?: Record<string, unknown>): void {
+  const safe = msg.replace(/[\r\n]/g, "\\n");
   const suffix = extra && Object.keys(extra).length > 0 ? ` ${JSON.stringify(extra)}` : "";
-  stream.write(`${level} ${msg}${suffix}\n`);
+  stream.write(`${level} ${safe}${suffix}\n`);
 }
 
 export const log = {

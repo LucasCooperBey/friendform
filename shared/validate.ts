@@ -19,14 +19,25 @@ function isAbsent(value: unknown): boolean {
   return false;
 }
 
+function readOwn(input: Record<string, unknown>, id: string): unknown {
+  if (!Object.hasOwn(input, id)) return undefined;
+  return input[id];
+}
+
+function normalizeAnswer(value: unknown): ResponseValue | undefined {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
+    return value.map((item) => item.trim());
+  }
+  return undefined;
+}
+
 function responsesFromInput(input: Record<string, unknown>): Responses {
   const responses: Responses = {};
-  for (const [key, value] of Object.entries(input)) {
-    if (typeof value === "string" || (typeof value === "number" && Number.isFinite(value))) {
-      responses[key] = value;
-    } else if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
-      responses[key] = value;
-    }
+  for (const key of Object.keys(input)) {
+    const normalized = normalizeAnswer(readOwn(input, key));
+    if (normalized !== undefined) responses[key] = normalized;
   }
   return responses;
 }
@@ -171,7 +182,7 @@ export function validateResponses(schema: FormSchema, input: unknown): Validatio
 
   for (const question of allQuestions(schema)) {
     if (!visible.has(question.questionId)) continue;
-    const result = checkQuestion(question, input[question.questionId]);
+    const result = checkQuestion(question, readOwn(input, question.questionId));
     if ("error" in result) errors[question.questionId] = result.error;
     else if ("value" in result) responses[question.questionId] = result.value;
   }

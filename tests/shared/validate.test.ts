@@ -182,4 +182,146 @@ describe("validateResponses", () => {
       errors: { nps: "Enter a whole number from 0 to 10." },
     });
   });
+
+  it("decides visibility from trimmed answers", () => {
+    // source: visible questions are computed from trimmed string answers and trimmed strings inside arrays
+    const follow: FormSchema = {
+      sections: [
+        {
+          title: "Gate",
+          questions: [
+            question({
+              questionId: "gate",
+              type: "radio",
+              prompt: "Gate",
+              required: true,
+              metadata: { options: ["yes", "no"] },
+            }),
+            question({
+              questionId: "follow",
+              type: "text",
+              prompt: "Follow",
+              required: true,
+              metadata: {
+                conditionalLogic: { enabled: true, questionId: "gate", operator: "equals", value: "yes" },
+              },
+            }),
+          ],
+        },
+      ],
+    };
+    expect(validateResponses(follow, { gate: " yes " })).toEqual({
+      ok: false,
+      errors: { follow: "This question is required." },
+    });
+    expect(validateResponses(follow, { gate: " yes ", follow: "x" })).toEqual({
+      ok: true,
+      responses: { gate: "yes", follow: "x" },
+    });
+
+    const colors: FormSchema = {
+      sections: [
+        {
+          title: "Colors",
+          questions: [
+            question({
+              questionId: "colors",
+              type: "checkbox",
+              prompt: "Colors",
+              required: false,
+              metadata: { options: ["red", "blue"] },
+            }),
+            question({
+              questionId: "why",
+              type: "text",
+              prompt: "Why",
+              required: true,
+              metadata: {
+                conditionalLogic: { enabled: true, questionId: "colors", operator: "array_includes", value: "red" },
+              },
+            }),
+          ],
+        },
+      ],
+    };
+    expect(validateResponses(colors, { colors: [" red "] })).toEqual({
+      ok: false,
+      errors: { why: "This question is required." },
+    });
+  });
+
+  it("treats prototype property names as unanswered when they are not own properties", () => {
+    // source: question ids constructor, toString, valueOf, and hasOwnProperty are read with Object.hasOwn
+    const proto: FormSchema = {
+      sections: [
+        {
+          title: "Proto",
+          questions: ["constructor", "toString", "valueOf", "hasOwnProperty"].map((questionId) =>
+            question({ questionId, type: "text", prompt: questionId, required: false }),
+          ),
+        },
+      ],
+    };
+    expect(validateResponses(proto, {})).toEqual({ ok: true, responses: {} });
+    expect(validateResponses(proto, { constructor: " kept " })).toEqual({
+      ok: true,
+      responses: { constructor: "kept" },
+    });
+  });
+
+  it("matches a trimmed answer to an option that still has surrounding spaces", () => {
+    // source: a choice option stored with surrounding spaces in an unnormalized schema matches the trimmed answer
+    const spaced: FormSchema = {
+      sections: [
+        {
+          title: "Choices",
+          questions: [
+            question({
+              questionId: "pick",
+              type: "dropdown",
+              prompt: "Pick",
+              required: true,
+              metadata: { options: [" yes ", " no "] },
+            }),
+          ],
+        },
+      ],
+    };
+    expect(validateResponses(spaced, { pick: " yes " })).toEqual({
+      ok: true,
+      responses: { pick: "yes" },
+    });
+  });
+
+  it("refuses a checkbox answer with fewer selections than minSelections", () => {
+    // source: a checkbox answer with fewer selections than minSelections is refused
+    const boxes: FormSchema = {
+      sections: [
+        {
+          title: "Boxes",
+          questions: [
+            question({
+              questionId: "boxes",
+              type: "checkbox",
+              prompt: "Boxes",
+              required: false,
+              metadata: { options: ["A", "B", "C"], minSelections: 2 },
+            }),
+          ],
+        },
+      ],
+    };
+    expect(validateResponses(boxes, { boxes: ["A"] })).toEqual({
+      ok: false,
+      errors: { boxes: "Choose at least 2 options." },
+    });
+  });
+
+  it("refuses a phone answer that contains letters", () => {
+    // source: a phone answer containing letters is refused
+    expect(validateResponses(schema, { gate: "no", phone: "555-CALL" })).toEqual({
+      ok: false,
+      errors: { phone: "Enter a valid phone number." },
+    });
+  });
 });

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -131,6 +131,14 @@ function main(): void {
   }
 }
 
+function sameFile(left: string, right: string): boolean {
+  try {
+    return realpathSync(left) === realpathSync(right);
+  } catch {
+    return false;
+  }
+}
+
 const thisFile = fileURLToPath(import.meta.url);
-const invoked = process.argv.some((arg) => path.resolve(arg) === thisFile);
+const invoked = process.argv.some((arg) => existsSync(arg) && sameFile(arg, thisFile));
 if (invoked) main();

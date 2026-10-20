@@ -1,6 +1,6 @@
 // source: server/db migrations, cascade deletes, unique violations, and timestamp precision
 
-import { count, eq } from "drizzle-orm";
+import { count, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS, emptySchema } from "../../shared/form-schema";
 import { formEvents, formVersions, forms, submissions, webhookDeliveries } from "../../server/db/schema";
@@ -127,5 +127,24 @@ describe("database", () => {
     if (!row) throw new Error("dated form was not stored");
     expect(row.createdAt).toEqual(written);
     expect(row.updatedAt).toEqual(written);
+  });
+
+  it("stores a default created_at in whole milliseconds", async () => {
+    // source: a row inserted without created_at reads back with extract(microseconds from created_at)::bigint % 1000 = 0
+    await db.insert(forms).values({
+      slug: "whole-ms",
+      title: "Whole",
+      draftSchema: emptySchema(),
+      settings: DEFAULT_SETTINGS,
+    });
+    const rows = await db
+      .select({
+        whole: sql<boolean>`extract(microseconds from created_at)::bigint % 1000 = 0`,
+      })
+      .from(forms)
+      .where(eq(forms.slug, "whole-ms"));
+    const stored = rows[0];
+    if (!stored) throw new Error("default timestamp row missing");
+    expect(stored.whole).toBe(true);
   });
 });

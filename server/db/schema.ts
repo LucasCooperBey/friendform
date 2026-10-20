@@ -20,12 +20,15 @@ export interface SubmissionMeta {
 const timestamp3 = (name: string) =>
   timestamp(name, { withTimezone: true, precision: 3, mode: "date" });
 
+export const FORM_STATUSES = ["draft", "published", "closed"] as const;
+export const FORM_EVENT_TYPES = ["view", "start", "submit"] as const;
+
 export const forms = pgTable("forms", {
   id: uuid("id").primaryKey().defaultRandom(),
   slug: text("slug").notNull().unique(),
   title: text("title").notNull(),
   description: text("description").notNull().default(""),
-  status: text("status").notNull().default("draft"),
+  status: text("status", { enum: FORM_STATUSES }).notNull().default("draft"),
   draftSchema: jsonb("draft_schema").$type<FormSchema>().notNull(),
   settings: jsonb("settings").$type<FormSettings>().notNull(),
   publishedVersionId: uuid("published_version_id"),
@@ -70,7 +73,7 @@ export const formEvents = pgTable(
       .notNull()
       .references(() => forms.id, { onDelete: "cascade" }),
     sessionId: text("session_id").notNull(),
-    type: text("type").notNull(),
+    type: text("type", { enum: FORM_EVENT_TYPES }).notNull(),
     createdAt: timestamp3("created_at").notNull().defaultNow(),
   },
   (table) => [

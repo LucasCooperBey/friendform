@@ -134,6 +134,15 @@ describe("form schema helpers", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("refuses a webhook URL that is not http or https", () => {
+    // source: formSettingsZ refuses a webhook URL whose protocol is not http or https, such as ftp://example.com/hook
+    expect(
+      formSettingsZ.safeParse({
+        webhooks: [{ id: "hook", url: "ftp://example.com/hook", format: "json", enabled: true }],
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe("publishProblems", () => {
@@ -227,6 +236,31 @@ describe("publishProblems", () => {
       ],
     };
     expect(publishProblems(schema)).toEqual([]);
+  });
+
+  it("refuses a condition that references a later question", () => {
+    // source: publishProblems refuses a condition whose question appears later in the form
+    expect(
+      publishProblems({
+        sections: [
+          {
+            title: "First",
+            questions: [
+              q({
+                questionId: "early",
+                type: "text",
+                prompt: "Early",
+                required: false,
+                metadata: {
+                  conditionalLogic: { enabled: true, questionId: "late", operator: "equals", value: "x" },
+                },
+              }),
+              q({ questionId: "late", type: "text", prompt: "Late", required: false }),
+            ],
+          },
+        ],
+      }),
+    ).toEqual(['Question 1 in section 1 ("Early") depends on a question that does not appear earlier.']);
   });
 });
 

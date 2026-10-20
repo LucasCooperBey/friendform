@@ -47,13 +47,18 @@ function arrayIncludes(
   return response === value;
 }
 
+function readResponse(responses: Responses, id: string): ResponseValue | undefined {
+  if (!Object.hasOwn(responses, id)) return undefined;
+  return responses[id];
+}
+
 export function evaluateCondition(
   condition: ConditionalLogic | undefined,
   responses: Responses,
 ): boolean {
   if (!condition || !condition.enabled) return true;
 
-  const response = responses[condition.questionId];
+  const response = readResponse(responses, condition.questionId);
   switch (condition.operator) {
     case "equals":
       return valuesEqual(response, condition.value);
@@ -82,10 +87,8 @@ export function visibleQuestionIds(schema: FormSchema, responses: Responses): Se
   for (const question of allQuestions(schema)) {
     if (!evaluateCondition(question.metadata?.conditionalLogic, visibleResponses)) continue;
     visible.add(question.questionId);
-    if (Object.prototype.hasOwnProperty.call(responses, question.questionId)) {
-      const value = responses[question.questionId];
-      if (value !== undefined) visibleResponses[question.questionId] = value;
-    }
+    const value = readResponse(responses, question.questionId);
+    if (value !== undefined) visibleResponses[question.questionId] = value;
   }
   return visible;
 }

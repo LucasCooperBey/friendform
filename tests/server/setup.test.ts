@@ -1,7 +1,7 @@
 // source: scripts/setup.ts fillEnv and the on-disk mode of .env
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -105,5 +105,19 @@ describe("setup script", () => {
     expect(result.stdout).toBe("");
     expect(readFileSync(envPath, "utf8")).toBe(text);
     expect(statSync(envPath).mode & 0o777).toBe(0o600);
+  });
+
+  it("writes .env when invoked through a symlink", () => {
+    // source: setup compares realpathSync of argv with its own file, so a symlinked path still writes .env
+    const dir = mkdtempSync(path.join(tmpdir(), "friendform-setup-link-"));
+    symlinkSync(path.resolve("node_modules"), path.join(dir, "node_modules"), "dir");
+    const link = path.join(dir, "setup.ts");
+    symlinkSync(path.resolve("scripts/setup.ts"), link);
+    const result = spawnSync("node", ["--import", "tsx", link], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    expect(result.status).toBe(0);
+    expect(statSync(path.join(dir, ".env")).mode & 0o777).toBe(0o600);
   });
 });

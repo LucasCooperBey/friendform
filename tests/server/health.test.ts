@@ -47,4 +47,11 @@ describe("GET /api/health", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, db: handle.kind, version: "0.1.0" });
   });
+
+  it("sends nosniff and does not send x-powered-by", async () => {
+    // source: GET /api/health carries x-content-type-options nosniff and no x-powered-by
+    const response = await fetch(`${baseUrl}/api/health`);
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("x-powered-by")).toBeNull();
+  });
 });
