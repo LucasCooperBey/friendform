@@ -92,3 +92,60 @@ Vite 8 prints a deprecation from `@vitejs/plugin-react` 4.7.0 about the `esbuild
 - data folder mode and the test database guard: the tests named in fixes 8 and 11
 
 Expected value changes: only the admin password sentence in `tests/server/config.test.ts` "names every missing or invalid variable and tells you to run setup", described in fix 6. No other test expectation was replaced.
+
+## Server API slice, incomplete because localhost listen is blocked
+
+The implementation adds session authentication, API origin and media-type checks, rate limiters, owner and public routers, CSV export, and webhook payload/delivery code. This is an unverified draft. No foundation file, dependency, migration, or existing test was changed. No commit or push was run.
+
+Implementation decisions:
+- The session signing key is cached per AppDeps object and initialized while createApp constructs the auth router. It combines SESSION_SECRET and ADMIN_PASSWORD as specified.
+- Publication locks the form row inside a transaction before calculating the next version. Both schemas are parsed and normalized when comparing draft and published content.
+- Submission pagination uses both created_at and id. One column builder supplies historical question columns to the submissions list and CSV, with response-only keys included only for CSV.
+- Webhook delivery races fetch against AbortSignal.timeout so an injected fetch that ignores its signal still terminates. Delivery recording locks the form row while inserting and pruning to 100 rows. Background recording errors log identifiers only.
+- The installed express-rate-limit package is 8.5.2; its declarations export ipKeyGenerator, which the limiters use. The architect supplied the registry receipt: maintainers nfriedly and gamemaker1, first release 1.0.0 on 2014-12-11, latest 8.7.1 on 2026-10-06, pinned 8.5.2 published 2026-05-14. No registry request was made.
+
+Verification attempted:
+
+```text
+$ bunx tsc --noEmit --extendedDiagnostics >| node_modules/.tsc-own.out 2>&1; rg 'error TS|^Check time' node_modules/.tsc-own.out | rg -v '^node_modules/'
+Check time:                  4.48s
+```
+
+The filtering command exited 0 with no source diagnostics. This ran after the server implementation and before the new test files, so it does not verify the final test code. The underlying full compiler run still includes the previously documented dependency declaration errors; this was not a clean full typecheck.
+
+```text
+$ bun run test -- tests/server/auth.test.ts
+$ vitest run tests/server/auth.test.ts
+
+ RUN  v4.1.8 /Users/lucascooper-bey/Developer/lucface/oss/friendform
+
+ Test Files  1 failed (1)
+      Tests  6 failed (6)
+   Start at  14:37:14
+   Duration  25.66s (transform 1.98s, setup 0ms, import 7.92s, tests 15.14s, environment 0ms)
+
+Error: listen EPERM: operation not permitted 127.0.0.1
+error: script "test" exited with code 1
+```
+
+All six authentication tests failed while creating the local HTTP server, before exercising a route. The helper closes its database when listen fails. No server was left listening. The sandbox contract requires stopping on this block; no alternate host, transport, or permission workaround was attempted.
+
+Outstanding work: create publish.test.ts, public.test.ts, submissions.test.ts, csv.test.ts, webhooks.test.ts and stats.test.ts; verify the existing new auth, security and forms tests; prove test sensitivity; review the implementation against the full interfaces; and run every VERIFICATION step. The full PGlite suite, Postgres suite, build, boot check, final compiler filter and migration-generation check were not run after the block. No existing test assertion was changed.
+
+GAPS: sandbox denies local HTTP listen with EPERM; implementation and integration coverage are incomplete and unverified.
+
+## Server API slice, finished
+
+The section above records the draft that could not listen. This section records the finish of the same slice.
+
+Content-Security-Policy. Helmet sets the production policy, with `useDefaults: false` and `frameguard` off. Express `finalhandler`, `send`, and `serve-static` then replace that header with `default-src 'none'` on their own 404 and error documents. `/f/example` has no route inside `createApp`, so a production request for it was reading that replacement. A terminal 404 registered in `createApp` would run before `server/index.ts` mounts the client, and the boot check requires `/` and `/forms/anything` to serve the SPA. `securityHeaders` wraps `res.setHeader` and drops a later write of exactly `default-src 'none'` when a policy is already present. In development and test it drops that value even when no policy is present, so the header stays absent. Other CSP values, including helmet's own policy, are written through. Unmatched paths still fall through to the client mount.
+
+Webhook delivery errors. A non-2xx response is recorded as `http_<status>`. An abort is `timeout`. Any other thrown error is `delivery_failed`. The spec asks for a short error and names `timeout` for an abort.
+
+CSV. `csvCell` prefixes a leading `=`, `+`, `-`, `@`, tab, or carriage return, then quotes the cell when it still contains a comma, a double quote, a carriage return, or a line feed. A value that starts with a carriage return is therefore both prefixed and quoted. `toCsv` starts with U+FEFF. `Response.text()` strips that character, so `tests/server/csv.test.ts` checks the raw bytes `EF BB BF`.
+
+Test sensitivity. Replacing `csvCell` with `return value` makes `tests/server/csv.test.ts` "guards formula prefixes and quotes cells with the RFC 4180 rules" fail: expected `'=1+1`, received `=1+1`. The function was restored before the verification run.
+
+express-rate-limit. The registry receipt in the previous section stands. This run did not contact a registry. The installed 8.5.2 declarations export `ipKeyGenerator`.
+
+Expected value changes: none. The production CSP test in `tests/server/security.test.ts` was already the correct policy. Two type annotations were added so `tsc` reports no errors outside `node_modules`, and no expected value changed. In `tests/server/security.test.ts`, the blocked header list is `Array<Record<string, string>>`, because the inferred union was not assignable to `HeadersInit`. In `tests/server/submissions.test.ts`, the pagination `path` and `page` locals are annotated `string` and `Page`, because the cursor loop otherwise inferred `any`.

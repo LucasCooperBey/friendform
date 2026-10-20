@@ -1,12 +1,31 @@
 import express from "express";
-import helmet from "helmet";
+import { authRouter } from "./auth";
 import type { Config } from "./config";
 import type { DbHandle } from "./db/index";
 import { log } from "./log";
+import { apiSecurity, securityHeaders } from "./security";
+import { formsRouter } from "./routes/forms";
+import { submissionsRouter } from "./routes/submissions";
+import { publicRouter } from "./routes/public";
+
+export interface RateLimitSettings {
+  loginPer15Min: number;
+  submitPer15MinPerForm: number;
+  eventsPerMinute: number;
+  publicReadsPerMinute: number;
+}
+
+export const DEFAULT_LIMITS: RateLimitSettings = {
+  loginPer15Min: 10, submitPer15MinPerForm: 100, eventsPerMinute: 120, publicReadsPerMinute: 120,
+};
 
 export interface AppDeps {
   config: Config;
   db: DbHandle;
+  limits?: Partial<RateLimitSettings>;
+  fetchImpl?: typeof fetch;
+  now?: () => Date;
+  onBackgroundTask?: (task: Promise<unknown>) => void;
 }
 
 const VERSION = "0.1.0";
@@ -55,7 +74,9 @@ function integerStatus(value: unknown): number | null {
 export function createApp(deps: AppDeps): express.Express {
   const app = express();
   app.disable("x-powered-by");
-  app.use(helmet({ contentSecurityPolicy: false }));
+  app.set("trust proxy", deps.config.trustProxy);
+  app.use(securityHeaders(deps.config));
+  app.use("/api", apiSecurity(deps.config));
   app.use(express.json({ limit: "512kb" }));
 
   app.get("/api/health", (_req, res) => {
@@ -65,6 +86,10 @@ export function createApp(deps: AppDeps): express.Express {
       version: VERSION,
     });
   });
+
+  app.use("/api/auth", authRouter(deps));
+  app.use("/api/forms", formsRouter(deps), submissionsRouter(deps));
+  app.use("/api/public/forms", publicRouter(deps));
 
   app.use("/api", (_req, res) => {
     res.status(404).json({ error: "not_found" });
