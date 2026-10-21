@@ -2,6 +2,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_SETTINGS } from "@shared/form-schema";
 import { TEMPLATES } from "@shared/templates";
 import { App } from "@/App";
 import { callsTo, mockRoute } from "./fetch-mock";
@@ -68,9 +69,27 @@ describe("FormsPage", () => {
     await user.click(await screen.findByRole("button", { name: "New form" }));
     const template = TEMPLATES[0];
     if (!template) throw new Error("missing template");
+    mockRoute("GET", "/api/forms/form-new", {
+      body: {
+        form: {
+          id: "form-new",
+          slug: "hello",
+          title: template.title,
+          description: "",
+          status: "draft",
+          publishedVersion: null,
+          submissionCount: 0,
+          createdAt: "2026-04-01T12:00:00.000Z",
+          updatedAt: "2026-04-01T12:00:00.000Z",
+          draftSchema: template.schema,
+          settings: DEFAULT_SETTINGS,
+          hasUnpublishedChanges: true,
+        },
+      },
+    });
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: new RegExp(`^${template.name}`) }));
-    expect(await screen.findByRole("heading", { name: "Edit form" })).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "Form title" })).toHaveValue(template.title);
     expect(callsTo("POST", "/api/forms")[0]?.body).toEqual({
       title: template.title,
       draftSchema: template.schema,

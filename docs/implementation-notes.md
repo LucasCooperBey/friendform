@@ -165,3 +165,37 @@ Vitest. The client project is happy-dom with `tests/client/setup.ts`. The node p
 Test sensitivity. Replacing the 401 sentence in `LoginPage` with "Password rejected." makes `tests/client/LoginPage.test.tsx` "shows the mismatch message on 401" fail: it waits for "That password didn't match." and the alert shows "Password rejected." The sentence was restored before the verification run.
 
 Expected value changes: none.
+
+## Form editor and responses
+
+The committed server, shared schema, and slice 2a client win where this slice's spec names a shape the code does not use.
+
+Completion rate. `GET /api/forms/:id/stats` returns `completionRate` as a ratio, or null when `views` is 0. The server value is `Math.round(submissions / views * 1000) / 1000`. The tiles show `Math.round(rate * 100)` with a percent sign. A rate of 0.25 is "25%". Null is "No views yet".
+
+Publish label. A form with `publishedVersion === null` always has `hasUnpublishedChanges` true, because the server compares the draft schema with a missing published schema. The button checks `publishedVersion === null` first and says "Publish". After a version exists it says "Publish changes" while `hasUnpublishedChanges` is true, and a disabled "Published" when that flag is false. Title and settings edits do not flip the flag. Only a draft schema that differs from the published schema does.
+
+Webhook signature sentence. The spec asks for one muted sentence on the `X-Friendform-Signature` header when `WEBHOOK_SECRET` is set. `GET /api/auth/session` does not say whether that secret is set, and this slice does not add a server field. The sentence is omitted. The server still sends the header when the secret is set.
+
+Date conditions. `QUESTION_TYPES` includes `date`. The spec's operator lists omit it. Date answers are strings, so the editor offers the text operators: is, is not, contains, doesn't contain, is empty, is answered.
+
+Paste a list. Pasting replaces the current options. Lines are trimmed, blanks and duplicates are dropped, and the list stops at 100. A paste that yields no options leaves the current list.
+
+Thank-you redirect. A blank redirect URL is omitted from settings, so `formSettingsZ` does not reject an empty string. A non-empty value that is not http or https stays in the local draft, the save is not sent, and `invalid` is the schema message. A blank delay omits `redirectDelaySeconds`. A typed delay is rounded and clamped from 0 to 60 on blur.
+
+Rating max. The number input keeps the typed value and clamps it from 2 to 10 on blur.
+
+Close and reopen. Both buttons render only after `publishedVersion` is not null. A draft shows "Publish the form before you can close it." Close, reopen, publish, and the slug save write the form query cache and do not replace the local draft.
+
+Slug button. The visible label is "Save link". It sends `PATCH { slug }` on its own, outside the debounced draft. Status 409 shows "That link is already taken." Status 400 shows "Use lowercase letters, numbers and dashes." `errorMessage` uses different sentences for those codes, and this control does not call it for 409 or 400.
+
+History count. Each version says "1 question" for a count of one and `${questionCount} questions` otherwise, the same wording as the forms list.
+
+useDraft. The hook also returns `adopt(next)`, `status` (`"loading" | "error" | "ready"`), `error`, and `reload()`. Restore uses `adopt`, which replaces the local draft and cancels a pending save, so the restored schema is not patched back. The page uses `status`, `error`, and `reload` for loading and failure, and does not start a second form query.
+
+Question metadata. A type change keeps the prompt, help text, required flag, and `conditionalLogic`, and drops metadata the new type does not use. Switching onto a choice type does not invent options. New and duplicated questions take `newQuestionId` across every id already in the draft.
+
+Dependency. `@radix-ui/react-popover` 1.1.15 is the popover. `bun add` wrote both `package.json` and `bun.lock`. The architect's registry receipt at 22:55 PT 2026-10-20: published 2025-08-13, first release 2020-12-15, maintainers hadihallak, chancestrickland, and mark-workos. This run did not contact the registry again.
+
+Expected value change. `tests/client/FormsPage.test.tsx` "posts a template schema" used to assert `expect(await screen.findByRole("heading", { name: "Edit form" })).toBeInTheDocument()`. The editor title is an input named "Form title", and the page has no "Edit form" heading. The test now mocks `GET /api/forms/form-new` with that template's form detail and asserts `expect(await screen.findByRole("textbox", { name: "Form title" })).toHaveValue(template.title)`. The POST body assertion is unchanged: `{ title: template.title, draftSchema: template.schema }`.
+
+Test sensitivity. Replacing `changedFields` so every save sends `title`, `description`, `draftSchema`, and `settings` makes `tests/client/useDraft.test.tsx` "debounces to one PATCH of only the changed fields" fail. Expected `{ title: "B", description: "More" }`. Received that object plus `draftSchema` and `settings`. The function was restored before the verification run.
