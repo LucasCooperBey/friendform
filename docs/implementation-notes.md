@@ -149,3 +149,19 @@ Test sensitivity. Replacing `csvCell` with `return value` makes `tests/server/cs
 express-rate-limit. The registry receipt in the previous section stands. This run did not contact a registry. The installed 8.5.2 declarations export `ipKeyGenerator`.
 
 Expected value changes: none. The production CSP test in `tests/server/security.test.ts` was already the correct policy. Two type annotations were added so `tsc` reports no errors outside `node_modules`, and no expected value changed. In `tests/server/security.test.ts`, the blocked header list is `Array<Record<string, string>>`, because the inferred union was not assignable to `HeadersInit`. In `tests/server/submissions.test.ts`, the pagination `path` and `page` locals are annotated `string` and `Page`, because the cursor loop otherwise inferred `any`.
+
+## Client foundation, slice 2a
+
+The committed server wins where the client spec names a shape the routes do not use. The client adapts. No server file changed.
+
+Session. `GET /api/auth/session` for an anonymous visitor is `{ authenticated: false }` and omits `publicUrl` and `aiEnabled`. The client treats those missing fields as `null` and `false`. A signed-in session includes both. `publicUrl` is `null` when `PUBLIC_URL` is unset. `POST /api/auth/login` returns 204 with no body, 401 `{ error: "invalid_password" }`, or 429 `{ error: "too_many_requests" }`. The sign-in page owns the 401 sentence "That password didn't match." and the 429 sentence "Too many attempts. Try again in 15 minutes." `POST /api/auth/logout` is 204.
+
+Forms. `GET /api/forms` returns `{ forms: FormSummary[] }`. Status on the wire is `draft`, `published`, or `closed`. The list badge says Live for `published`. `POST /api/forms` returns 201 `{ form: FormDetail }`. A blank form posts `{ title: "Untitled form" }` and omits `draftSchema`, which the server defaults. A template posts `{ title, draftSchema }`. `POST /api/forms/:id/duplicate` has an empty body and returns 201 `{ form }`. `DELETE /api/forms/:id` returns 204.
+
+Public form. `GET /api/public/forms/:slug` returns 200 with `slug`, `title`, `description`, `version`, `schema`, and `settings`. Settings also include `allowAutofill`, which this slice ignores. 404 is `{ error: "not_found" }` for a missing or unpublished form. 410 is `{ error: "closed", title, closedMessage }` and does not include a theme, so a closed form does not override the owner theme. `POST .../submissions` returns 201 `{ id }`. The view's `onSubmit` adapts that to `{ ok: true }`. A 400 body is `{ error: "invalid_responses", errors }` or `{ error: "invalid_body" }`. The string entries in `errors` are shown on the matching questions. 429 uses the page sentence "Too many submissions from your network. Try again in a few minutes." `POST .../events` returns 204. `referrer` is omitted when `document.referrer` is empty. The honeypot does not count as the first input, so a start event is the first question change. The submitted responses are the object returned by `validateResponses`, which drops hidden questions. Preview mode does not call `onSubmit`.
+
+Vitest. The client project is happy-dom with `tests/client/setup.ts`. The node project also includes `tests/helpers/**/*.test.ts`, and both projects keep `testTimeout: 20000` and the existing `fileParallelism` rule, so the database helper test still runs and PGlite does not fall back to a five second timeout. `bun.lock` changed because `bun add` records the pinned packages. No existing test assertion was edited.
+
+Test sensitivity. Replacing the 401 sentence in `LoginPage` with "Password rejected." makes `tests/client/LoginPage.test.tsx` "shows the mismatch message on 401" fail: it waits for "That password didn't match." and the alert shows "Password rejected." The sentence was restored before the verification run.
+
+Expected value changes: none.
