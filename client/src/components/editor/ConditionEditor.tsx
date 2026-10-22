@@ -71,7 +71,8 @@ export function ConditionEditor({
       });
       return;
     }
-    if (logic) {
+    const kept = logic ? earlier.find((question) => question.questionId === logic.questionId) : undefined;
+    if (logic && kept && operatorsFor(kept.type).includes(logic.operator)) {
       onChange({ ...logic, enabled: true });
       return;
     }

@@ -47,6 +47,11 @@ interface PatchBody {
 const DEBOUNCE_MS = 800;
 
 const draftFlushers = new Map<string, () => Promise<void>>();
+const discardedDrafts = new Set<string>();
+
+export function discardFormDraft(formId: string): void {
+  discardedDrafts.add(formId);
+}
 
 export function flushFormDraft(formId: string): Promise<void> {
   const flush = draftFlushers.get(formId);
@@ -192,6 +197,8 @@ export function useDraft(formId: string): {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tail = useRef<Promise<void>>(Promise.resolve());
   const mounted = useRef(true);
+  const formIdRef = useRef(formId);
+  formIdRef.current = formId;
   const persistRef = useRef<(throwOnInvalid: boolean) => Promise<void>>(async () => undefined);
   const enqueueRef = useRef<(throwOnInvalid: boolean) => Promise<void>>(async () => undefined);
   const flushRef = useRef<() => Promise<void>>(async () => undefined);
@@ -222,6 +229,7 @@ export function useDraft(formId: string): {
   }
 
   async function persistBody(throwOnInvalid: boolean): Promise<void> {
+    if (discardedDrafts.has(formId)) return;
     const snapshot = draftRef.current;
     const baseline = savedRef.current;
     if (!snapshot || !baseline) return;
@@ -325,6 +333,7 @@ export function useDraft(formId: string): {
   }
 
   useEffect(() => {
+    discardedDrafts.delete(formIdRef.current);
     mounted.current = true;
     return () => {
       mounted.current = false;
@@ -332,6 +341,7 @@ export function useDraft(formId: string): {
         clearTimeout(timer.current);
         timer.current = null;
       }
+      if (discardedDrafts.has(formIdRef.current)) return;
       const snapshot = draftRef.current;
       const baseline = savedRef.current;
       if (snapshot && baseline && !sameDraft(snapshot, baseline)) {

@@ -84,4 +84,32 @@ describe("ConditionEditor", () => {
     expect(within(third).getByRole("combobox", { name: "Operator" })).toHaveTextContent("includes");
     expect(within(third).getByRole("combobox", { name: "Comparison value" })).toHaveTextContent("Blue");
   });
+
+  // source: turning a condition back on must not restore a controlling question that was deleted or an operator that question type no longer allows
+  it("starts a new condition when the kept one no longer fits", async () => {
+    const user = userEvent.setup();
+    render(<Host />);
+    const third = () => screen.getByRole("article", { name: "Third" });
+    await user.click(within(third()).getByRole("button", { name: "Edit Third" }));
+    await user.click(within(third()).getByRole("switch", { name: /Only show this question when/ }));
+    await user.click(within(third()).getByRole("combobox", { name: "Controlling question" }));
+    await user.click(screen.getByRole("option", { name: "Second" }));
+    expect(within(third()).getByRole("combobox", { name: "Operator" })).toHaveTextContent("includes");
+    await user.click(within(third()).getByRole("switch", { name: /Only show this question when/ }));
+
+    const second = () => screen.getByRole("article", { name: "Second" });
+    await user.click(within(second()).getByRole("button", { name: "Edit Second" }));
+    await user.click(within(second()).getByRole("combobox", { name: "Question type" }));
+    await user.click(screen.getByRole("option", { name: "Short text" }));
+    await user.click(within(third()).getByRole("switch", { name: /Only show this question when/ }));
+    expect(within(third()).getByRole("combobox", { name: "Controlling question" })).toHaveTextContent("First");
+    expect(within(third()).getByRole("combobox", { name: "Operator" }).textContent?.trim()).toBe("is");
+    await user.click(within(third()).getByRole("switch", { name: /Only show this question when/ }));
+
+    await user.click(within(screen.getByRole("article", { name: "First" })).getByRole("button", { name: "Delete: First" }));
+    await user.click(within(third()).getByRole("switch", { name: /Only show this question when/ }));
+    expect(within(third()).getByRole("combobox", { name: "Controlling question" })).toHaveTextContent("Second");
+    expect(within(third()).getByRole("combobox", { name: "Operator" }).textContent?.trim()).toBe("is");
+    expect(within(third()).queryByText("Choose a question")).not.toBeInTheDocument();
+  });
 });

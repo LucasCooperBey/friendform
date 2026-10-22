@@ -518,3 +518,45 @@ The honeypot branch of `POST /:slug/submissions` still answers 201 and stores no
 Submit counts an unparsed question only when its id is in the `visible` set, and it uses that same check when choosing the question to focus. "Enter a number." is passed only for a visible question. Test: "submits when an unparsed number is on a hidden question". A choice question shows a number question for one choice. Typing "5,5", then choosing the other choice, then submitting posts `{ responses: { choice: "No" }, website: "" }` with no `count` answer. Counting every unparsed id again left the banner "Some answers need attention." and the test could not find "Saved". Exit 1. Showing "Enter a number." for a hidden question again left that sentence in the page text. Exit 1.
 
 `bun run test` then exited 0: node 29 files, 170 tests; client 13 files, 85 tests.
+
+## Slice 4e: typing numbers, cancel copy, restored conditions, delete
+
+### Typing numbers
+
+`NumberField` keeps the last stored number when the text is not a plain number. Empty text still clears it. The question stays marked unparsed, so submit stays blocked while that question is visible, and a stale number is not submitted.
+
+"Enter a number." shows at once for text that is neither a partial plain number nor scientific notation, such as `5,5`. That leaves "rejects number text that is not a plain number" and "submits when an unparsed number is on a hidden question" passing with their existing assertions. Partial text (`-`, `1.`, `-0.`) and scientific text (`1e`, `1e3`) wait until the field blurs or the respondent tries to submit. The message goes away as soon as the text parses.
+
+In "rejects number text that is not a plain number", the expects for "Enter a number." right after `1e3` and `1.` now blur the input first (`await user.tab()`). Every other assertion in that test is unchanged.
+
+Test: "keeps the next question up while a number is still being typed". The follow-up question uses `is_not_empty`, because the schema has no greater-than operator. That condition hides when the number is cleared and stays true for 2, 1, and 1.5. Typing `-` then `3` never shows "Enter a number." Replacing an existing 2 with `1.5` keeps the follow-up visible on `1`, `1.`, and `1.5`. Typing `1e` over `1.5` does the same until blur. Submitting while the text is `1.` shows the message, shows "Some answers need attention.", and does not reach the thank-you page.
+
+Clearing the stored number and showing the message on every unparsed keystroke made that test fail: after typing `-`, the page contained "Enter a number." Exit 1. Restored.
+
+### Cancel copy
+
+`settleFill` says "No answers changed." when the respondent cancels and no answer was applied at once (`base + added === 0`). Every other toast still uses `filledToast`, including a fill that matched nothing and a cancel that kept answers applied at once. Tests left unchanged: "toasts the server filled count", "does not count an empty fill as the first input", "counts only the answers kept when Replace is cancelled", and the e2e line that expects "Filled 4 answers. Check them before you submit."
+
+Test: "says no answers changed when a cancelled fill applied nothing". Toasting `filledToast(base + added)` again made it fail. The open toast was "Nothing in that file matched these questions." and "No answers changed." was not found. Exit 1. Restored.
+
+### Restored conditions
+
+`enable(true)` copies the kept condition back only when its `questionId` is in `earlier` and its operator is in `operatorsFor` of that question's type. Otherwise it builds a new condition from the first earlier question, the same path used when there is no kept condition.
+
+Test: "starts a new condition when the kept one no longer fits". After the controlling checkbox is changed to short text, turning the condition on selects First and the operator "is". After First is deleted, turning it on selects Second and "is", and "Choose a question" is absent. "restores the condition that was turned off" was not edited.
+
+Restoring whenever `logic` was present selected Second after the type change. The test expected First. Exit 1. Restored. Dropping only the check that the question is still in `earlier`, after First was deleted, showed "Choose a question" where the test expected Second. Exit 1. Restored.
+
+### Delete
+
+`discardFormDraft(formId)` adds the id to a set beside `draftFlushers`. `removeForm` calls it after the DELETE succeeds and before it navigates home. The unmount effect skips the save when that id is in the set. `persistBody` returns before any request for the same reason, so a debounce that fires between the delete and the unmount does not PATCH either. The next mount of that id clears the flag.
+
+Test: "does not save a draft after the form is deleted". It sets the thank-you title to Bye, deletes, waits for the form list, and asserts that no PATCH follows the DELETE. "drops the form list and the deleted form after delete" was not edited.
+
+Removing the unmount skip and the `persistBody` check left one PATCH after the DELETE, with `settings.thankYou.title` of "Bye". Exit 1. Restored.
+
+### Test hygiene
+
+"says second when one second is left" waits with `findByText` for "Redirecting in 2 seconds." The 5000 ms wait on "Redirecting in 1 second." is unchanged. "logs an invalid honeypot slug as invalid" expects the log line to contain `{"slug":"invalid"}`.
+
+`bun run test` then exited 0: node 29 files, 170 tests; client 13 files, 89 tests.

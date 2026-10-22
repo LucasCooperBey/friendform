@@ -239,15 +239,107 @@ describe("QuestionRenderer", () => {
     await user.clear(input);
     await user.type(input, "1e3");
     expect(input).toHaveValue("1e3");
+    await user.tab();
     expect(screen.getByText("Enter a number.")).toBeInTheDocument();
     await user.clear(input);
     await user.type(input, "1.");
     expect(input).toHaveValue("1.");
+    await user.tab();
     expect(screen.getByText("Enter a number.")).toBeInTheDocument();
     await user.type(input, "5");
     expect(input).toHaveValue("1.5");
     expect(screen.queryByText("Enter a number.")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Submit" }));
     expect(await screen.findByRole("heading", { name: "Thanks" })).toBeInTheDocument();
+  });
+
+  // source: partial numbers and scientific text must not flash "Enter a number." or clear the stored number, so a later question stays up
+  it("keeps the next question up while a number is still being typed", async () => {
+    const user = userEvent.setup();
+    render(
+      <PublicFormView
+        mode="preview"
+        form={{
+          title: "Count form",
+          description: "",
+          schema: {
+            sections: [{
+              title: "Numbers",
+              questions: [
+                { questionId: "amount", type: "number", prompt: "Amount", required: false },
+                {
+                  questionId: "note",
+                  type: "text",
+                  prompt: "Note",
+                  required: false,
+                  metadata: {
+                    conditionalLogic: { enabled: true, questionId: "amount", operator: "is_not_empty" },
+                  },
+                },
+              ],
+            }],
+          },
+          settings: {
+            theme: "light",
+            showProgress: false,
+            thankYou: { title: "Thanks", message: "Saved" },
+          },
+        }}
+      />,
+    );
+    const amount = screen.getByLabelText("Amount");
+    if (!(amount instanceof HTMLInputElement)) throw new Error("amount input missing");
+    expect(screen.queryByRole("textbox", { name: "Note" })).not.toBeInTheDocument();
+
+    await user.type(amount, "-");
+    expect(screen.queryByText("Enter a number.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Note" })).not.toBeInTheDocument();
+    await user.type(amount, "3");
+    expect(amount).toHaveValue("-3");
+    expect(screen.queryByText("Enter a number.")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Note" })).toBeInTheDocument();
+
+    await user.clear(amount);
+    expect(screen.queryByRole("textbox", { name: "Note" })).not.toBeInTheDocument();
+    await user.type(amount, "2");
+    expect(screen.getByRole("textbox", { name: "Note" })).toBeInTheDocument();
+    await user.type(amount, "1", { initialSelectionStart: 0, initialSelectionEnd: amount.value.length });
+    expect(amount).toHaveValue("1");
+    expect(screen.queryByText("Enter a number.")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Note" })).toBeInTheDocument();
+    await user.type(amount, ".");
+    expect(amount).toHaveValue("1.");
+    expect(screen.queryByText("Enter a number.")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Note" })).toBeInTheDocument();
+    await user.type(amount, "5");
+    expect(amount).toHaveValue("1.5");
+    expect(screen.queryByText("Enter a number.")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Note" })).toBeInTheDocument();
+
+    await user.type(amount, "1", { initialSelectionStart: 0, initialSelectionEnd: amount.value.length });
+    await user.type(amount, "e");
+    expect(amount).toHaveValue("1e");
+    expect(screen.queryByText("Enter a number.")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Note" })).toBeInTheDocument();
+    await user.type(amount, "3");
+    expect(amount).toHaveValue("1e3");
+    expect(screen.queryByText("Enter a number.")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Note" })).toBeInTheDocument();
+    await user.tab();
+    expect(screen.getByText("Enter a number.")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Note" })).toBeInTheDocument();
+
+    await user.type(amount, "4", { initialSelectionStart: 0, initialSelectionEnd: amount.value.length });
+    expect(amount).toHaveValue("4");
+    expect(screen.queryByText("Enter a number.")).not.toBeInTheDocument();
+    await user.type(amount, "1.", { initialSelectionStart: 0, initialSelectionEnd: amount.value.length });
+    expect(amount).toHaveValue("1.");
+    expect(screen.queryByText("Enter a number.")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Note" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    expect(screen.getByText("Enter a number.")).toBeInTheDocument();
+    expect(screen.getByText("Some answers need attention.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Thanks" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Note" })).toBeInTheDocument();
   });
 });

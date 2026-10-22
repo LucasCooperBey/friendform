@@ -290,7 +290,7 @@ describe("PublicFormPage", () => {
       const user = userEvent.setup();
       renderRedirect("live", 2);
       await user.click(screen.getByRole("button", { name: "Submit" }));
-      expect(screen.getByText("Redirecting in 2 seconds.")).toBeInTheDocument();
+      expect(await screen.findByText("Redirecting in 2 seconds.")).toBeInTheDocument();
       expect(await screen.findByText("Redirecting in 1 second.", {}, { timeout: 5000 })).toBeInTheDocument();
     } finally {
       assign.mockRestore();

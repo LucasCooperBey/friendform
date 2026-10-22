@@ -85,6 +85,7 @@ export function PublicFormView({ form, mode, autofillSlug, onSubmit, onFirstInpu
   const [done, setDone] = useState(false);
   const [pendingFill, setPendingFill] = useState<Responses | null>(null);
   const [unparsed, setUnparsed] = useState<Record<string, true>>({});
+  const [numberError, setNumberError] = useState<Record<string, true>>({});
   const started = useRef(false);
   const responsesRef = useRef(responses);
   responsesRef.current = responses;
@@ -93,6 +94,8 @@ export function PublicFormView({ form, mode, autofillSlug, onSubmit, onFirstInpu
   const immediateRef = useRef(0);
   const unparsedRef = useRef(unparsed);
   unparsedRef.current = unparsed;
+  const numberErrorRef = useRef(numberError);
+  numberErrorRef.current = numberError;
   const showAutofill = mode === "live" && autofillSlug !== undefined && form.settings.allowAutofill === true;
 
   const visible = useMemo(() => visibleQuestionIds(form.schema, responses), [form.schema, responses]);
@@ -158,7 +161,12 @@ export function PublicFormView({ form, mode, autofillSlug, onSubmit, onFirstInpu
     immediateRef.current = 0;
     setPendingFill(null);
     const added = replace ? applyAnswers(pending) : 0;
-    toast({ title: filledToast(base + added) });
+    const total = base + added;
+    if (!replace && total === 0) {
+      toast({ title: "No answers changed." });
+      return;
+    }
+    toast({ title: filledToast(total) });
   }
 
   function markUnparsed(id: string, flag: boolean) {
@@ -170,6 +178,31 @@ export function PublicFormView({ form, mode, autofillSlug, onSubmit, onFirstInpu
     else delete next[id];
     unparsedRef.current = next;
     setUnparsed(next);
+  }
+
+  function markNumberError(id: string, show: boolean) {
+    const current = numberErrorRef.current;
+    const has = current[id] === true;
+    if (show === has) return;
+    const next = { ...current };
+    if (show) next[id] = true;
+    else delete next[id];
+    numberErrorRef.current = next;
+    setNumberError(next);
+  }
+
+  function revealNumberErrors(ids: string[]) {
+    const current = numberErrorRef.current;
+    const next = { ...current };
+    let changed = false;
+    for (const id of ids) {
+      if (next[id] === true) continue;
+      next[id] = true;
+      changed = true;
+    }
+    if (!changed) return;
+    numberErrorRef.current = next;
+    setNumberError(next);
   }
 
   function update(id: string, value: ResponseValue | undefined) {
@@ -193,8 +226,9 @@ export function PublicFormView({ form, mode, autofillSlug, onSubmit, onFirstInpu
     const result = validateResponses(form.schema, responses);
     const unparsedNow = unparsedRef.current;
     const unparsedVisible = (questionId: string) => visible.has(questionId) && unparsedNow[questionId] === true;
-    const hasUnparsed = Object.keys(unparsedNow).some(unparsedVisible);
-    if (!result.ok || hasUnparsed) {
+    const unparsedIds = Object.keys(unparsedNow).filter(unparsedVisible);
+    if (!result.ok || unparsedIds.length > 0) {
+      if (unparsedIds.length > 0) revealNumberErrors(unparsedIds);
       setErrors(result.ok ? {} : result.errors);
       setBanner("Some answers need attention.");
       const first = allQuestions(form.schema).find(
@@ -284,7 +318,8 @@ export function PublicFormView({ form, mode, autofillSlug, onSubmit, onFirstInpu
                           value={readResponse(responses, question.questionId)}
                           onChange={(value) => update(question.questionId, value)}
                           onNumberUnparsed={(flag) => markUnparsed(question.questionId, flag)}
-                          error={visible.has(question.questionId) && unparsed[question.questionId] ? "Enter a number." : errors[question.questionId]}
+                          onNumberError={(show) => markNumberError(question.questionId, show)}
+                          error={visible.has(question.questionId) && numberError[question.questionId] ? "Enter a number." : errors[question.questionId]}
                           disabled={submitting}
                         />
                       </Collapse>

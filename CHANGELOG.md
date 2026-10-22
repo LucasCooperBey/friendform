@@ -37,3 +37,7 @@
 - A honeypot warning logs a slug that matches the slug pattern, and logs invalid for any other path text.
 - The redirect countdown says "1 second" when one second is left.
 - A hidden question whose number is still unparsed does not block submit, and "Enter a number." is shown only while that question is visible.
+- Typing a decimal or a negative number keeps the next question in place, and "Enter a number." waits until you leave the field or submit.
+- Cancelling document fill when no answer was applied says "No answers changed."
+- Turning a condition back on builds a new one when the saved question was removed or its operator no longer fits.
+- Deleting a form does not save the draft while the editor closes.

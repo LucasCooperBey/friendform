@@ -266,7 +266,7 @@ it("logs an invalid honeypot slug as invalid", async () => {
       .filter((line) => line.includes("submission_honeypot"));
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("warn submission_honeypot");
-    expect(lines[0]).toContain("invalid");
+    expect(lines[0]).toContain('{"slug":"invalid"}');
     expect(lines[0]).not.toContain(slug);
     expect(await handle.db.select().from(submissions).where(eq(submissions.id, bait.id))).toEqual([]);
   } finally {

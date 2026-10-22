@@ -7,7 +7,7 @@ import { App } from "@/App";
 import type { FormDetail } from "@/components/editor/useDraft";
 import { queryClient } from "@/lib/session";
 import { isRecord } from "@/lib/utils";
-import { callsTo, mockRoute } from "./fetch-mock";
+import { calls, callsTo, mockRoute } from "./fetch-mock";
 
 const ISO = "2026-04-01T12:00:00.000Z";
 const UUID = "11111111-1111-4111-8111-111111111111";
@@ -169,5 +169,28 @@ describe("SettingsTab", () => {
       invalidate.mockRestore();
       remove.mockRestore();
     }
+  });
+
+  // source: deleting a form with an unsaved edit must not PATCH that form when the editor unmounts
+  it("does not save a draft after the form is deleted", async () => {
+    const user = userEvent.setup();
+    mockRoute("GET", "/api/forms/form-1", { body: { form: detail() } });
+    mockRoute("GET", "/api/forms", { body: { forms: [] } });
+    mockRoute("PATCH", "/api/forms/form-1", { status: 500, body: { error: "server_error" } });
+    mockRoute("DELETE", "/api/forms/form-1", { status: 204 });
+    renderSettings();
+    await user.click(await screen.findByRole("tab", { name: "Settings" }));
+    const title = screen.getByLabelText("Thank-you title");
+    await user.clear(title);
+    await user.type(title, "Bye");
+    await user.click(screen.getByRole("button", { name: "Delete form" }));
+    await user.click(await screen.findByRole("button", { name: "Delete" }));
+    expect(await screen.findByRole("heading", { name: "Your forms" })).toBeInTheDocument();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 1000);
+    });
+    const deleteIndex = calls.findIndex((call) => call.method === "DELETE" && call.path === "/api/forms/form-1");
+    expect(deleteIndex).toBeGreaterThanOrEqual(0);
+    expect(calls.slice(deleteIndex + 1).filter((call) => call.method === "PATCH")).toEqual([]);
   });
 });

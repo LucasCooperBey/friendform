@@ -199,4 +199,19 @@ describe("AutofillButton", () => {
       expect(callsTo("POST", "/api/public/forms/hello/events").some((call) => isRecord(call.body) && call.body.type === "start")).toBe(true);
     });
   });
+
+  // source: cancelling the replace dialog when no answer was applied at once says "No answers changed."
+  it("says no answers changed when a cancelled fill applied nothing", async () => {
+    mockRoute("POST", PATH, { body: { answers: { name: "Ada" }, filled: 1 } });
+    renderLive();
+    const user = userEvent.setup();
+    await dismissOpenToasts(user);
+    await user.type(screen.getByLabelText(/Your name/), "Bea");
+    await user.upload(screen.getByLabelText("Document"), new File(["Ada"], "notes.txt", { type: "text/plain" }));
+    expect(await screen.findByText("This will replace 1 answer you already entered.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByText("No answers changed.")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing in that file matched these questions.")).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/Your name/)).toHaveValue("Bea");
+  });
 });

@@ -5,7 +5,7 @@ import { ApiError, api, errorMessage } from "@/lib/api";
 import { queryClient, useSession } from "@/lib/session";
 import { toast } from "@/hooks/use-toast";
 import { WebhooksEditor } from "@/components/editor/WebhooksEditor";
-import { formQueryKey, parseFormDetail, type FormDetail } from "@/components/editor/useDraft";
+import { discardFormDraft, formQueryKey, parseFormDetail, type FormDetail } from "@/components/editor/useDraft";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -88,6 +88,7 @@ export function SettingsTab({
   async function removeForm() {
     try {
       await api<void>(`/api/forms/${encodeURIComponent(form.id)}`, { method: "DELETE" });
+      discardFormDraft(form.id);
       await queryClient.invalidateQueries({ queryKey: ["forms"] });
       queryClient.removeQueries({ queryKey: formQueryKey(form.id) });
       toast({ title: "Form deleted" });

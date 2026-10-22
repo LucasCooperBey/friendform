@@ -16,9 +16,22 @@ export interface QuestionRendererProps {
   error?: string;
   disabled?: boolean;
   onNumberUnparsed?: (unparsed: boolean) => void;
+  onNumberError?: (show: boolean) => void;
 }
 
-const NUMBER_TEXT = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/;
+const PLAIN_NUMBER = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/;
+const PARTIAL_NUMBER = /^[+-]$|^[+-]?(?:\d+\.|\.\d*)$/;
+const SCIENTIFIC_NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)[eE][+-]?\d*$/;
+
+function plainNumber(text: string): number | undefined {
+  if (!PLAIN_NUMBER.test(text)) return undefined;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function deferNumberError(text: string): boolean {
+  return PARTIAL_NUMBER.test(text) || SCIENTIFIC_NUMBER.test(text);
+}
 
 const TEXT_FIELDS = {
   text: { type: "text", inputMode: "text", autoComplete: "on" },
@@ -78,6 +91,7 @@ function NumberField({
   invalid,
   disabled,
   onUnparsed,
+  onError,
 }: {
   question: Question;
   value: ResponseValue | undefined;
@@ -86,23 +100,43 @@ function NumberField({
   invalid: boolean;
   disabled: boolean | undefined;
   onUnparsed?: (unparsed: boolean) => void;
+  onError?: (show: boolean) => void;
 }) {
   const [text, setText] = useState(typeof value === "number" ? String(value) : "");
   const emitted = useRef(value);
   const onUnparsedRef = useRef(onUnparsed);
+  const onErrorRef = useRef(onError);
   onUnparsedRef.current = onUnparsed;
+  onErrorRef.current = onError;
 
   useEffect(() => {
     if (Object.is(value, emitted.current)) return;
     emitted.current = value;
     setText(typeof value === "number" ? String(value) : "");
     onUnparsedRef.current?.(false);
+    onErrorRef.current?.(false);
   }, [value]);
 
-  function clearStored() {
-    if (emitted.current === undefined) return;
-    emitted.current = undefined;
-    onChange(undefined);
+  function publish(next: string) {
+    setText(next);
+    const trimmed = next.trim();
+    if (trimmed === "") {
+      emitted.current = undefined;
+      onChange(undefined);
+      onUnparsedRef.current?.(false);
+      onErrorRef.current?.(false);
+      return;
+    }
+    const parsed = plainNumber(trimmed);
+    if (parsed !== undefined) {
+      onUnparsedRef.current?.(false);
+      onErrorRef.current?.(false);
+      emitted.current = parsed;
+      onChange(parsed);
+      return;
+    }
+    onUnparsedRef.current?.(true);
+    if (!deferNumberError(trimmed)) onErrorRef.current?.(true);
   }
 
   return (
@@ -115,30 +149,11 @@ function NumberField({
       aria-describedby={described}
       disabled={disabled}
       value={text}
-      onChange={(event) => {
-        const next = event.target.value;
-        setText(next);
-        const trimmed = next.trim();
-        if (trimmed === "") {
-          emitted.current = undefined;
-          onChange(undefined);
-          onUnparsedRef.current?.(false);
-          return;
-        }
-        if (!NUMBER_TEXT.test(trimmed)) {
-          clearStored();
-          onUnparsedRef.current?.(true);
-          return;
-        }
-        const parsed = Number(trimmed);
-        if (!Number.isFinite(parsed)) {
-          clearStored();
-          onUnparsedRef.current?.(true);
-          return;
-        }
-        onUnparsedRef.current?.(false);
-        emitted.current = parsed;
-        onChange(parsed);
+      onChange={(event) => publish(event.target.value)}
+      onBlur={(event) => {
+        const trimmed = event.currentTarget.value.trim();
+        if (trimmed === "" || plainNumber(trimmed) !== undefined) return;
+        onErrorRef.current?.(true);
       }}
     />
   );
@@ -290,7 +305,7 @@ function RatingField({
 }
 
 function Control(props: QuestionRendererProps & { described: string | undefined; invalid: boolean }) {
-  const { question, value, onChange, disabled, described, invalid, onNumberUnparsed } = props;
+  const { question, value, onChange, disabled, described, invalid, onNumberUnparsed, onNumberError } = props;
   const options = question.metadata?.options ?? [];
 
   switch (question.type) {
@@ -335,6 +350,7 @@ function Control(props: QuestionRendererProps & { described: string | undefined;
           invalid={invalid}
           disabled={disabled}
           onUnparsed={onNumberUnparsed}
+          onError={onNumberError}
         />
       );
     case "date":
