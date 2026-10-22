@@ -1,0 +1,12 @@
+node_modules
+dist
+data
+.env
+.env.*
+!.env.example
+.git
+docs/plans
+tests
+playwright-report
+test-results
+.omx

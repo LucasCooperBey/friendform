@@ -1,0 +1,27 @@
+services:
+  friendform:
+    build: .
+    env_file: .env
+    ports:
+      - "3000:3000"
+    volumes:
+      - friendform-data:/data
+    restart: unless-stopped
+    # The embedded database is stored on friendform-data. To use Postgres instead,
+    # uncomment the postgres service, the friendform-postgres volume, and this
+    # DATABASE_URL line. The URL points at the postgres service on the compose network.
+    # environment:
+    #   DATABASE_URL: postgresql://postgres:postgres@postgres:5432/friendform
+
+  # postgres:
+  #   image: postgres:17-alpine
+  #   environment:
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: postgres
+  #     POSTGRES_DB: friendform
+  #   volumes:
+  #     - friendform-postgres:/var/lib/postgresql/data
+
+volumes:
+  friendform-data:
+  # friendform-postgres:

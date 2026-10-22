@@ -293,3 +293,82 @@ Test sensitivity, each mutation restored before the next:
 - Skipping the prune made `holds at most 10000 keys after 10001 distinct charges` fail (size 10001) and `drops ended windows before the window that ends soonest` fail (size 10001).
 - Removing the `prepare` budget check made the autofill test fail (422 instead of 429).
 - Removing the `finally` charge made the same autofill test fail (422 instead of 429).
+
+## Slice 4: Docker, CI, browser tests, and docs
+
+### Fake AI request recording
+
+`tests/server/ai-fake.ts` records a chat request when it arrives, before `readBody`, and sets `body` after the body is parsed. A 300 ms wait was inserted before `readBody` only for the proof below, then removed. No assertion in `tests/server/ai.test.ts` was changed.
+
+Command, with the wait and the original record-after-read order:
+
+`bunx vitest run --project node tests/server/ai.test.ts -t "does not retry a timeout"`
+
+Exit 1:
+
+```
+ RUN  v4.1.8 /Users/lucascooper-bey/Developer/lucface/oss/friendform
+
+ ❯ |node| tests/server/ai.test.ts (15 tests | 1 failed | 14 skipped) 190ms
+     × does not retry a timeout 187ms
+
+ FAIL  |node| tests/server/ai.test.ts > createAiClient > does not retry a timeout
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ tests/server/ai.test.ts:141:27
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 14 skipped (15)
+   Start at  23:48:44
+   Duration  4.93s (transform 927ms, setup 0ms, import 3.81s, tests 190ms, environment 0ms)
+```
+
+Same command after recording on arrival, with the same 300 ms wait still in place. Exit 0:
+
+```
+ RUN  v4.1.8 /Users/lucascooper-bey/Developer/lucface/oss/friendform
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 14 skipped (15)
+   Start at  23:49:52
+   Duration  2.01s (transform 355ms, setup 0ms, import 1.39s, tests 171ms, environment 0ms)
+```
+
+The wait is gone in the committed-ready file. `startAiFake` still defaults to port 0. An empty reply queue now returns answers for the `questionId`s after the `Questions: ` marker in the system message. A canned reply still wins, because `queue.shift()` runs first. `GET /e2e/requests` and `DELETE /e2e/requests` let the Playwright worker read that log. The worker is a different process, so it cannot see the in-memory array.
+
+### Browser tests
+
+`playwright.config.ts` deletes `.e2e-data/<run id>` and starts `bun run build && node dist/server.mjs` on `127.0.0.1:4173` with the fixed e2e password and session secret. `globalSetup` spawns `bun tests/e2e/global-setup.ts` with `FRIENDFORM_E2E_FAKE=1`, which listens on `127.0.0.1:4180`. `globalTeardown` kills that pid. `vitest.config.ts` was not changed. Its include globs do not match `tests/e2e`.
+
+`scripts/screenshots.ts` uses its own temp data directory and port 4174. The Project intake `reach` condition is added only in that script's cloned schema. The editor PNGs scroll so the comparison value sits in the frame, which shows the condition: controlling question, operator, and value.
+
+### CI action pins
+
+`git ls-remote` on 2026-10-22 returned one SHA per tag, so each pin is the commit:
+
+- `actions/checkout` v6.1.0 `d23441a48e516b6c34aea4fa41551a30e30af803`
+- `actions/setup-node` v6.5.0 `249970729cb0ef3589644e2896645e5dc5ba9c38`
+- `actions/upload-artifact` v6.0.0 `b7c566a772e6b6bfb58ed0dc250532a479d7789f`
+- `oven-sh/setup-bun` has no v4, v5, or v6 tag. The newest tag found is v2.2.0 `0c5077e51419868618aeaa5fe8019c62421857d6`, with `bun-version: 1.3.5`.
+
+`bun.lock` lists `@playwright/test` 1.63.0 because `bun install --frozen-lockfile` is what CI and the image run.
+
+### Docker
+
+`docker` is not on PATH (`zsh: command not found: docker`), and it is not at `/usr/local/bin/docker`, `/opt/homebrew/bin/docker`, or the Docker Desktop path. No image was built here, so there is no `ls -a /app` listing. The Dockerfile, `.dockerignore`, and `docker-compose.yml` are in the tree. The verification command below does not build the image.
+
+### Application code
+
+Nothing under `server/`, `client/`, or `shared/` was changed.
+
+One autofill run, started together with `tests/server/ai.test.ts` while the machine was busy, failed `charges PDF reading time to the address and answers 429 when that time is used`: the first request was 429 and the test expected 422. The same test then passed alone (3.59s). The autofill file passed (16 tests). The full suite below passed. No assertion and no server code was changed for that failure.
+
+### Verification
+
+The verification command exited 0. Node: 28 files, 160 tests. Client: 12 files, 63 tests. `check:boot` and `check:extract` passed. `tsc` reached `Check time: 9.92s` and had 0 `error TS` lines outside `node_modules/`. Playwright: 2 passed.

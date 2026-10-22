@@ -129,16 +129,22 @@ describe("createAiClient", () => {
   });
 
   // source: a timeout is not retried. A short timeout against a slow reply throws AiError timeout after one request.
+  // The client's fetch calls are counted, because under load the client can give up before the fake sees the request.
   it("does not retry a timeout", async () => {
     fake = await startAiFake();
     fake.push({ delayMs: 1000, content: "{\"ok\":true}" });
-    const client = createAiClient(aiConfig(fake.baseUrl));
+    let calls = 0;
+    const fetchImpl: typeof fetch = (input, init) => {
+      calls += 1;
+      return fetch(input, init);
+    };
+    const client = createAiClient(aiConfig(fake.baseUrl), { fetchImpl });
     const started = Date.now();
     await expect(client.completeJson([{ role: "user", content: "hello there" }], { timeoutMs: 150 })).rejects.toMatchObject({
       code: "timeout",
     });
     expect(Date.now() - started).toBeLessThan(450);
-    expect(fake.requests).toHaveLength(1);
+    expect(calls).toBe(1);
   });
 
   // source: a 500 is retried once after 500 ms, and the second success is returned.

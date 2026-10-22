@@ -8,5 +8,6 @@ coverage
 .omx
 playwright-report
 test-results
+.e2e-data
 *.log
 .DS_Store

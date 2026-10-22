@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.5
+      - run: bun install --frozen-lockfile
+      - name: Typecheck own code
+        run: |
+          # Full tsc fails only on declaration files inside node_modules (drizzle-orm, pglite); skipLibCheck is an open owner decision. This step fails on any error outside node_modules.
+          (bunx tsc --noEmit --extendedDiagnostics >| node_modules/.tsc-own.out 2>&1; true) && grep -q '^Check time' node_modules/.tsc-own.out && ! (grep 'error TS' node_modules/.tsc-own.out | grep -qv '^node_modules/')
+      - run: bun run test
+      - run: bun run build
+      - run: bun run check:boot
+      - run: bun run check:extract
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run test:e2e
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: playwright-report
+          path: playwright-report
+          if-no-files-found: ignore
+
+  test-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: friendform_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.5
+      - run: bun install --frozen-lockfile
+      - name: Test against Postgres
+        run: bun run test
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/friendform_test
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Build image
+        run: docker build -t friendform:ci .
+      - name: Container answers /api/health
+        run: |
+          set -euo pipefail
+          cleanup() { docker rm -f friendform-ci >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker run -d --name friendform-ci \
+            -e ADMIN_PASSWORD=ci-password-not-secret \
+            -e SESSION_SECRET=ci-session-secret-not-a-real-secret-00 \
+            -p 3000:3000 \
+            friendform:ci
+          ok=0
+          for _ in $(seq 1 60); do
+            body=$(curl -fsS http://127.0.0.1:3000/api/health || true)
+            case "$body" in
+              '{"ok":true'*) ok=1; break ;;
+            esac
+            sleep 1
+          done
+          if [ "$ok" != 1 ]; then
+            docker logs friendform-ci || true
+            exit 1
+          fi
+      - name: Image contents and parsers
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint sh friendform:ci -c 'ls -a /app; echo ---DIST---; ls -a /app/dist'
+          docker run --rm --entrypoint sh friendform:ci -c '
+            set -eu
+            for name in .env data tests; do
+              if ls -a /app | grep -qx "$name" || ls -a /app/dist | grep -qx "$name"; then
+                echo "image contains $name"
+                exit 1
+              fi
+            done
+            test -f /app/dist/extract-child.mjs
+          '
+          output=$(docker run --rm --entrypoint node friendform:ci -e "import('unpdf').then(() => import('mammoth')).then(() => console.log('parsers ok'))")
+          printf '%s\n' "$output"
+          printf '%s\n' "$output" | grep -q 'parsers ok'
