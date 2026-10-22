@@ -19,7 +19,7 @@ export interface Extractor {
   readonly busy: boolean;
 }
 
-const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_RSS_MB = 512;
 const DEFAULT_HEAP_MB = 256;
 const MAX_TEXT = 40_000;

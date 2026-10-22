@@ -265,3 +265,31 @@ Test sensitivity, each mutation restored before the next:
 - Putting the 7 MB parser back at app level made `rejects a second oversized autofill body with 429 before reading it` fail (413 instead of 429).
 - Removing the busy check made `returns busy while another file is being read` fail (422 instead of 503) and `rejects a second job while one is running and accepts a job after it ends` time out.
 - Removing the PDF signature check made `rejects a mislabeled PDF and Word upload before starting a child` fail (the spy resolved text instead of rejecting).
+
+## Slice 3c: reading time per address
+
+One child reads one PDF or Word file at a time. That slot bounds memory on a small server. The time a request spends inside `extractUpload` is charged to the address that sent it.
+
+`RateLimitSettings.extractionMsPerHourPerIp` defaults to 30_000. `autofillHandlers` merges limits the same way `publicRouter` does, `{ ...DEFAULT_LIMITS, ...deps.limits }`, and calls `createExtractionBudget(limits.extractionMsPerHourPerIp)` once per call. The key is `ipKeyGenerator(req.ip ?? req.socket.remoteAddress ?? "unknown")`, the same expression `limiter` uses.
+
+`prepare` checks that budget after the body and base64 checks and before `extractUpload`. When the address is out of time, the response is 429 `{ error: "too_many_requests" }` and `Retry-After` is `retryAfterSeconds(key)`. That value is the whole seconds until the address's window ends, rounded up, and at least 1. The busy 503, the per-form daily quota, the per-address daily cap, and the autofill middleware order in `server/routes/public.ts` are unchanged.
+
+The charge is `Date.now()` around the `extractUpload` call, taken in a `finally` block, so a call that resolves, rejects, or is aborted still counts. A key's window starts at its first charge and stays open until `windowMs` has passed (`3_600_000` by default). `allows` is false once the charged total in that window reaches the limit. A charge at or after the end starts a new window and a new total. Negative or non-finite milliseconds add 0.
+
+The map holds at most 10,000 keys. A charge that would add a key at that size first deletes every key whose window has ended. If 10,000 remain, it deletes the key whose window ends soonest.
+
+The child timeout default is now 10 seconds (`DEFAULT_TIMEOUT_MS` is `10_000`).
+
+The autofill test helper sets `extractionMsPerHourPerIp` to `3_600_000` unless a test passes its own value, the same way it sets `autofillPerDayPerIp` to 1000.
+
+Tests. `tests/server/extract-budget.test.ts` uses an injected clock for the limit, the new window, independent keys, `retryAfterSeconds`, and the 10,000 key cap. `tests/server/autofill.test.ts` "charges PDF reading time to the address and answers 429 when that time is used" boots `tests/fixtures/children/hang.mjs` with `timeoutMs: 300` and `extractionMsPerHourPerIp: 500`, with the per-form and per-address caps high enough to stay out of the way. Two PDF uploads from one address are 422 `file_too_complex`, the third is 429 `too_many_requests` with `Retry-After`, and a PDF from another address is 422.
+
+No new dependencies.
+
+Test sensitivity, each mutation restored before the next:
+
+- `allows` returning true made `allows a key until its charged time reaches the limit` fail (`true` instead of `false`) and `charges PDF reading time to the address and answers 429 when that time is used` fail (422 instead of 429).
+- `charge` returning immediately made all seven tests in `tests/server/extract-budget.test.ts` fail.
+- Skipping the prune made `holds at most 10000 keys after 10001 distinct charges` fail (size 10001) and `drops ended windows before the window that ends soonest` fail (size 10001).
+- Removing the `prepare` budget check made the autofill test fail (422 instead of 429).
+- Removing the `finally` charge made the same autofill test fail (422 instead of 429).

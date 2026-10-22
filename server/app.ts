@@ -19,6 +19,7 @@ export interface RateLimitSettings {
   autofillPer15MinPerForm: number;
   autofillPerDayPerForm: number;
   autofillPerDayPerIp: number;
+  extractionMsPerHourPerIp: number;
 }
 
 export const DEFAULT_LIMITS: RateLimitSettings = {
@@ -30,6 +31,7 @@ export const DEFAULT_LIMITS: RateLimitSettings = {
   autofillPer15MinPerForm: 5,
   autofillPerDayPerForm: 200,
   autofillPerDayPerIp: 20,
+  extractionMsPerHourPerIp: 30_000,
 };
 
 export interface AppDeps {

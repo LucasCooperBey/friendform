@@ -99,6 +99,7 @@ async function boot(options: {
       autofillPerDayPerForm: 1000,
       autofillPerDayPerIp: 1000,
       publicReadsPerMinute: 1000,
+      extractionMsPerHourPerIp: 3_600_000,
       ...options.limits,
     },
     extraction: options.extraction,
@@ -494,5 +495,35 @@ describe("POST /api/public/forms/:slug/autofill", () => {
     expect(second.headers.get("retry-after")).toBe("5");
     expect(await second.json()).toEqual({ error: "busy" });
     expect(await readJson(await first, 422)).toEqual({ error: "file_too_complex" });
+  });
+
+  // source: slice 3b review, slow files hold the single reader: PDF reading time is charged to the address, then that address gets 429 while another address is still read.
+  it("charges PDF reading time to the address and answers 429 when that time is used", async () => {
+    const running = await boot({
+      trustProxy: 1,
+      limits: {
+        extractionMsPerHourPerIp: 500,
+        autofillPer15MinPerForm: 100,
+        autofillPerDayPerForm: 100,
+        autofillPerDayPerIp: 100,
+      },
+      extraction: {
+        childPath: path.join(fixtures, "children", "hang.mjs"),
+        timeoutMs: 300,
+      },
+    });
+    const form = await publishSample(running, true);
+    const pathName = `/api/public/forms/${form.slug}/autofill`;
+    const pdf = readFileSync(path.join(fixtures, "sample.pdf"));
+    const body = uploadBody(pdf, "application/pdf", "sample.pdf");
+    const firstIp = "192.0.2.40";
+    const secondIp = "192.0.2.41";
+    expect(await readJson(await running.request(pathName, fromIp(body, firstIp)), 422)).toEqual({ error: "file_too_complex" });
+    expect(await readJson(await running.request(pathName, fromIp(body, firstIp)), 422)).toEqual({ error: "file_too_complex" });
+    const blocked = await running.request(pathName, fromIp(body, firstIp));
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("retry-after")).toMatch(/^[1-9]\d*$/);
+    expect(await readJson(blocked, 429)).toEqual({ error: "too_many_requests" });
+    expect(await readJson(await running.request(pathName, fromIp(body, secondIp)), 422)).toEqual({ error: "file_too_complex" });
   });
 });

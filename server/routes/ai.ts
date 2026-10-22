@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { Router, type Request, type RequestHandler, type Response } from "express";
+import { ipKeyGenerator } from "express-rate-limit";
 import { z } from "zod";
 import {
   allQuestions,
@@ -21,6 +22,7 @@ import { AiError, createAiClient, type ChatMessage } from "../ai";
 import { DEFAULT_LIMITS, type AppDeps } from "../app";
 import { requireOwner } from "../auth";
 import { forms } from "../db/schema";
+import { createExtractionBudget } from "../extract-budget";
 import { ExtractError, extractUpload, type Extracted } from "../extract-text";
 import { createExtractor } from "../extract-runner";
 import { publishedVersion } from "../forms-service";
@@ -339,6 +341,8 @@ export function autofillHandlers(deps: AppDeps): { prepare: RequestHandler; answ
   const db = deps.db.db;
   const ai = createAiClient(deps.config.ai);
   const extractor = createExtractor(deps.extraction);
+  const limits = { ...DEFAULT_LIMITS, ...deps.limits };
+  const budget = createExtractionBudget(limits.extractionMsPerHourPerIp);
   const prepared = new WeakMap<Request, PreparedAutofill>();
 
   const prepare: RequestHandler = async (req, res, next) => {
@@ -368,11 +372,25 @@ export function autofillHandlers(deps: AppDeps): { prepare: RequestHandler; answ
         return;
       }
       if (ended()) return;
-      const extracted = await extractUpload(
-        { filename: body.data.filename, mimeType: body.data.mimeType, data },
-        extractor,
-        signal,
-      );
+      const key = ipKeyGenerator(req.ip ?? req.socket.remoteAddress ?? "unknown");
+      if (!budget.allows(key)) {
+        if (!ended()) {
+          res.set("Retry-After", String(budget.retryAfterSeconds(key)));
+          res.status(429).json({ error: "too_many_requests" });
+        }
+        return;
+      }
+      const startedAt = Date.now();
+      let extracted: Extracted;
+      try {
+        extracted = await extractUpload(
+          { filename: body.data.filename, mimeType: body.data.mimeType, data },
+          extractor,
+          signal,
+        );
+      } finally {
+        budget.charge(key, Date.now() - startedAt);
+      }
       if (ended()) return;
       prepared.set(req, { schema: version.schema, extracted, signal });
       next();
