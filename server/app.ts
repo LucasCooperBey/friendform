@@ -8,6 +8,7 @@ import { formsRouter } from "./routes/forms";
 import { submissionsRouter } from "./routes/submissions";
 import { aiRouter } from "./routes/ai";
 import { publicRouter } from "./routes/public";
+import type { ExtractionOptions } from "./extract-runner";
 
 export interface RateLimitSettings {
   loginPer15Min: number;
@@ -17,6 +18,7 @@ export interface RateLimitSettings {
   aiGeneratePerHour: number;
   autofillPer15MinPerForm: number;
   autofillPerDayPerForm: number;
+  autofillPerDayPerIp: number;
 }
 
 export const DEFAULT_LIMITS: RateLimitSettings = {
@@ -27,6 +29,7 @@ export const DEFAULT_LIMITS: RateLimitSettings = {
   aiGeneratePerHour: 20,
   autofillPer15MinPerForm: 5,
   autofillPerDayPerForm: 200,
+  autofillPerDayPerIp: 20,
 };
 
 export interface AppDeps {
@@ -36,6 +39,7 @@ export interface AppDeps {
   fetchImpl?: typeof fetch;
   now?: () => Date;
   onBackgroundTask?: (task: Promise<unknown>) => void;
+  extraction?: Partial<ExtractionOptions>;
 }
 
 const VERSION = "0.1.0";
@@ -87,8 +91,14 @@ export function createApp(deps: AppDeps): express.Express {
   app.set("trust proxy", deps.config.trustProxy);
   app.use(securityHeaders(deps.config));
   app.use("/api", apiSecurity(deps.config));
-  app.use("/api/public/forms/:slug/autofill", express.json({ limit: "7mb" }));
-  app.use(express.json({ limit: "512kb" }));
+  const parseJson = express.json({ limit: "512kb" });
+  app.use((req, res, next) => {
+    if (req.method === "POST" && /^\/api\/public\/forms\/[^/]+\/autofill$/.test(req.path)) {
+      next();
+      return;
+    }
+    parseJson(req, res, next);
+  });
 
   app.get("/api/health", (_req, res) => {
     res.status(200).json({

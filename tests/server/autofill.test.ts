@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { RateLimitSettings } from "../../server/app";
+import type { AppDeps, RateLimitSettings } from "../../server/app";
 import type { Config } from "../../server/config";
 import type { DbHandle } from "../../server/db/index";
 import { submissions } from "../../server/db/schema";
@@ -75,6 +75,7 @@ async function boot(options: {
   limits?: Partial<RateLimitSettings>;
   trustProxy?: false | number;
   withDb?: boolean;
+  extraction?: AppDeps["extraction"];
 } = {}): Promise<TestApp> {
   fake = await startAiFake();
   const ai: Config["ai"] = {
@@ -96,9 +97,11 @@ async function boot(options: {
       aiGeneratePerHour: 1000,
       autofillPer15MinPerForm: 1000,
       autofillPerDayPerForm: 1000,
+      autofillPerDayPerIp: 1000,
       publicReadsPerMinute: 1000,
       ...options.limits,
     },
+    extraction: options.extraction,
   });
   return app;
 }
@@ -384,5 +387,112 @@ describe("POST /api/public/forms/:slug/autofill", () => {
       headers: { "Content-Type": "application/json" },
       body: encoded,
     }), 413)).toEqual({ error: "payload_too_large" });
+  });
+
+  // source: an upload rejected before the AI call does not use the form's daily autofill quota.
+  it("keeps the daily form quota when an upload is rejected before the model", async () => {
+    const running = await boot({
+      limits: { autofillPerDayPerForm: 1, autofillPer15MinPerForm: 10, autofillPerDayPerIp: 10 },
+    });
+    if (!fake) throw new Error("fake missing");
+    const form = await publishSample(running, true);
+    const pathName = `/api/public/forms/${form.slug}/autofill`;
+    fake.push(replyJson({ answers: { name: "Ada" } }));
+    expect(await readJson(await running.request(pathName, jsonBody(uploadBody(PNG, "application/pdf", "photo.pdf"))), 415)).toEqual({
+      error: "unsupported_file",
+    });
+    expect(await readJson(await running.request(pathName, jsonBody(uploadBody(Buffer.from("Ada is here"), "text/plain"))))).toEqual({
+      answers: { name: "Ada" },
+      filled: 1,
+    });
+    expect(fake.requests).toHaveLength(1);
+  });
+
+  // source: a request that reaches the AI call still uses the daily form quota when the reply is not JSON.
+  it("uses the daily form quota when the model reply is not JSON", async () => {
+    const running = await boot({
+      limits: { autofillPerDayPerForm: 1, autofillPer15MinPerForm: 10, autofillPerDayPerIp: 10 },
+    });
+    if (!fake) throw new Error("fake missing");
+    const form = await publishSample(running, true);
+    const pathName = `/api/public/forms/${form.slug}/autofill`;
+    const body = uploadBody(Buffer.from("Ada is here"), "text/plain");
+    fake.push({ content: "not-json" });
+    expect((await running.request(pathName, jsonBody(body))).status).toBe(502);
+    expect(await readJson(await running.request(pathName, jsonBody(body)), 429)).toEqual({ error: "too_many_requests" });
+    expect(fake.requests).toHaveLength(1);
+  });
+
+  // source: autofill has a daily cap per address, shared across forms.
+  it("rate limits autofill per address across a day", async () => {
+    const running = await boot({
+      trustProxy: 1,
+      limits: { autofillPerDayPerIp: 2, autofillPer15MinPerForm: 10, autofillPerDayPerForm: 10 },
+    });
+    if (!fake) throw new Error("fake missing");
+    const first = await publishSample(running, true);
+    const second = await publishSample(running, true);
+    const third = await publishSample(running, true);
+    const body = uploadBody(Buffer.from("Ada is here"), "text/plain");
+    const ip = "192.0.2.10";
+    fake.push(replyJson({ answers: { name: "Ada" } }), replyJson({ answers: { name: "Ada" } }));
+    expect((await running.request(`/api/public/forms/${first.slug}/autofill`, fromIp(body, ip))).status).toBe(200);
+    expect((await running.request(`/api/public/forms/${second.slug}/autofill`, fromIp(body, ip))).status).toBe(200);
+    expect(await readJson(await running.request(`/api/public/forms/${third.slug}/autofill`, fromIp(body, ip)), 429)).toEqual({
+      error: "too_many_requests",
+    });
+  });
+
+  // source: the per-address limiter runs before the 7 MB autofill body is read.
+  it("rejects a second oversized autofill body with 429 before reading it", async () => {
+    const running = await boot({
+      trustProxy: 1,
+      limits: { autofillPer15MinPerForm: 1, autofillPerDayPerForm: 10, autofillPerDayPerIp: 10 },
+    });
+    if (!fake) throw new Error("fake missing");
+    const form = await publishSample(running, true);
+    const pathName = `/api/public/forms/${form.slug}/autofill`;
+    const ip = "192.0.2.20";
+    fake.push(replyJson({ answers: { name: "Ada" } }));
+    expect((await running.request(pathName, fromIp(uploadBody(Buffer.from("Ada is here"), "text/plain"), ip))).status).toBe(200);
+    const payload = uploadBody(Buffer.from("A".repeat(6 * 1024 * 1024)), "text/plain", "big.txt");
+    const encoded = JSON.stringify(payload);
+    expect(encoded.length).toBeGreaterThan(7 * 1024 * 1024);
+    const response = await running.request(pathName, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Forwarded-For": ip },
+      body: encoded,
+    });
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({ error: "too_many_requests" });
+  });
+
+  // source: a second PDF is busy while the first is still being read, and the first times out as too complex.
+  it("returns busy while another file is being read", async () => {
+    let releaseStarted: () => void = () => {};
+    const started = new Promise<void>((resolve) => {
+      releaseStarted = resolve;
+    });
+    const running = await boot({
+      limits: { autofillPer15MinPerForm: 10, autofillPerDayPerForm: 10, autofillPerDayPerIp: 10 },
+      extraction: {
+        childPath: path.join(fixtures, "children", "hang.mjs"),
+        timeoutMs: 2000,
+        onSpawn() {
+          releaseStarted();
+        },
+      },
+    });
+    const form = await publishSample(running, true);
+    const pathName = `/api/public/forms/${form.slug}/autofill`;
+    const pdf = readFileSync(path.join(fixtures, "sample.pdf"));
+    const body = jsonBody(uploadBody(pdf, "application/pdf", "sample.pdf"));
+    const first = running.request(pathName, body);
+    await started;
+    const second = await running.request(pathName, body);
+    expect(second.status).toBe(503);
+    expect(second.headers.get("retry-after")).toBe("5");
+    expect(await second.json()).toEqual({ error: "busy" });
+    expect(await readJson(await first, 422)).toEqual({ error: "file_too_complex" });
   });
 });

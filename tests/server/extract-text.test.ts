@@ -1,21 +1,9 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { createExtractor, type Extractor } from "../../server/extract-runner";
 import { ExtractError, extractUpload } from "../../server/extract-text";
-
-const pdfCalls = vi.hoisted(() => ({ count: 0 }));
-
-vi.mock("unpdf", async () => {
-  const actual = await vi.importActual<typeof import("unpdf")>("unpdf");
-  return {
-    ...actual,
-    getDocumentProxy: async (...args: Parameters<typeof actual.getDocumentProxy>) => {
-      pdfCalls.count += 1;
-      return actual.getDocumentProxy(...args);
-    },
-  };
-});
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "../fixtures");
 const PNG = Buffer.from(
@@ -24,38 +12,54 @@ const PNG = Buffer.from(
 );
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-beforeEach(() => {
-  pdfCalls.count = 0;
-});
+// PDF parsing runs in a child process, so a test counts the PDF jobs handed to a real extractor.
+function countingExtractor(): { extractor: Extractor; pdfJobs: () => number } {
+  const real = createExtractor();
+  let jobs = 0;
+  return {
+    extractor: {
+      get busy() {
+        return real.busy;
+      },
+      run(job, signal) {
+        if (job.kind === "pdf") jobs += 1;
+        return real.run(job, signal);
+      },
+    },
+    pdfJobs: () => jobs,
+  };
+}
 
 describe("extractUpload", () => {
   // source: a PNG labeled as a PDF is rejected before the PDF parser runs.
   it("rejects a PNG labeled as a PDF without calling the PDF parser", async () => {
-    await expect(extractUpload({ filename: "photo.pdf", mimeType: "application/pdf", data: PNG })).rejects.toMatchObject({
+    const counted = countingExtractor();
+    await expect(extractUpload({ filename: "photo.pdf", mimeType: "application/pdf", data: PNG }, counted.extractor)).rejects.toMatchObject({
       name: "ExtractError",
       code: "unsupported",
     });
-    expect(pdfCalls.count).toBe(0);
+    expect(counted.pdfJobs()).toBe(0);
   });
 
   // source: a real PDF is parsed, and a malformed PDF that passes the signature becomes unsupported.
   it("reads a PDF and turns a malformed PDF into unsupported", async () => {
     const pdf = readFileSync(path.join(fixtures, "sample.pdf"));
-    const extracted = await extractUpload({ filename: "sample.pdf", mimeType: "application/pdf", data: pdf });
+    const counted = countingExtractor();
+    const extracted = await extractUpload({ filename: "sample.pdf", mimeType: "application/pdf", data: pdf }, counted.extractor);
     expect(extracted).toEqual({ kind: "text", text: expect.stringContaining("Hello from the sample PDF") });
-    expect(pdfCalls.count).toBe(1);
-    pdfCalls.count = 0;
+    expect(counted.pdfJobs()).toBe(1);
+    const malformed = countingExtractor();
     await expect(extractUpload({
       filename: "bad.pdf",
       mimeType: "application/pdf",
       data: Buffer.from("%PDF-1.4 this is not a real document"),
-    })).rejects.toBeInstanceOf(ExtractError);
+    }, malformed.extractor)).rejects.toBeInstanceOf(ExtractError);
     await expect(extractUpload({
       filename: "bad.pdf",
       mimeType: "application/pdf",
       data: Buffer.from("%PDF-1.4 this is not a real document"),
-    })).rejects.toMatchObject({ code: "unsupported" });
-    expect(pdfCalls.count).toBe(2);
+    }, malformed.extractor)).rejects.toMatchObject({ code: "unsupported" });
+    expect(malformed.pdfJobs()).toBe(2);
   });
 
   // source: a docx is read, and the same zip labeled as a generic zip is unsupported.
@@ -71,12 +75,13 @@ describe("extractUpload", () => {
 
   // source: text types are decoded as UTF-8, including a charset parameter, and are not rejected for a PDF signature.
   it("reads plain text, markdown, and csv without sniffing them as binaries", async () => {
+    const counted = countingExtractor();
     expect(await extractUpload({
       filename: "a.txt",
       mimeType: "text/plain",
       data: Buffer.from("%PDF this is plain text"),
-    })).toEqual({ kind: "text", text: "%PDF this is plain text" });
-    expect(pdfCalls.count).toBe(0);
+    }, counted.extractor)).toEqual({ kind: "text", text: "%PDF this is plain text" });
+    expect(counted.pdfJobs()).toBe(0);
     expect(await extractUpload({
       filename: "a.txt",
       mimeType: "text/plain; charset=utf-8",
@@ -111,10 +116,11 @@ describe("extractUpload", () => {
   // source: data over 5 MB is too_large before parsing, and exactly 5 MB of text is cut to 40000 characters.
   it("rejects data over 5 MB and cuts exactly 5 MB of text", async () => {
     const over = Buffer.alloc(5 * 1024 * 1024 + 1, 0x41);
-    await expect(extractUpload({ filename: "big.pdf", mimeType: "application/pdf", data: over })).rejects.toMatchObject({
+    const counted = countingExtractor();
+    await expect(extractUpload({ filename: "big.pdf", mimeType: "application/pdf", data: over }, counted.extractor)).rejects.toMatchObject({
       code: "too_large",
     });
-    expect(pdfCalls.count).toBe(0);
+    expect(counted.pdfJobs()).toBe(0);
     const exact = Buffer.alloc(5 * 1024 * 1024, 0x41);
     expect(await extractUpload({ filename: "exact.txt", mimeType: "text/plain", data: exact })).toEqual({
       kind: "text",
@@ -141,5 +147,28 @@ describe("extractUpload", () => {
     await expect(extractUpload({ filename: "a.png", mimeType: "image/png", data: jpeg })).rejects.toMatchObject({
       code: "unsupported",
     });
+  });
+
+  // source: a PNG labeled as a PDF, and a non-zip labeled as a Word document, are rejected before a child starts.
+  it("rejects a mislabeled PDF and Word upload before starting a child", async () => {
+    let calls = 0;
+    const spy = {
+      get busy() {
+        return false;
+      },
+      run() {
+        calls += 1;
+        return Promise.resolve("unused");
+      },
+    };
+    await expect(extractUpload({ filename: "photo.pdf", mimeType: "application/pdf", data: PNG }, spy)).rejects.toMatchObject({
+      code: "unsupported",
+    });
+    await expect(extractUpload({
+      filename: "notes.docx",
+      mimeType: DOCX_MIME,
+      data: Buffer.from("this is not a zip"),
+    }, spy)).rejects.toMatchObject({ code: "unsupported" });
+    expect(calls).toBe(0);
   });
 });

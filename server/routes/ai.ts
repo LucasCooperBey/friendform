@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { Router, type RequestHandler, type Response } from "express";
+import { Router, type Request, type RequestHandler, type Response } from "express";
 import { z } from "zod";
 import {
   allQuestions,
@@ -21,7 +21,8 @@ import { AiError, createAiClient, type ChatMessage } from "../ai";
 import { DEFAULT_LIMITS, type AppDeps } from "../app";
 import { requireOwner } from "../auth";
 import { forms } from "../db/schema";
-import { ExtractError, extractUpload } from "../extract-text";
+import { ExtractError, extractUpload, type Extracted } from "../extract-text";
+import { createExtractor } from "../extract-runner";
 import { publishedVersion } from "../forms-service";
 import { limiter } from "../security";
 
@@ -209,12 +210,22 @@ function sendAiError(res: Response, error: AiError): void {
 }
 
 function sendExtractError(res: Response, error: ExtractError): void {
+  if (error.code === "aborted") return;
   if (error.code === "too_large") {
     res.status(413).json({ error: "file_too_large" });
     return;
   }
   if (error.code === "empty") {
     res.status(422).json({ error: "empty_file" });
+    return;
+  }
+  if (error.code === "too_complex") {
+    res.status(422).json({ error: "file_too_complex" });
+    return;
+  }
+  if (error.code === "busy") {
+    res.set("Retry-After", "5");
+    res.status(503).json({ error: "busy" });
     return;
   }
   res.status(415).json({ error: "unsupported_file" });
@@ -318,38 +329,75 @@ export function aiRouter(deps: AppDeps): Router {
   return router;
 }
 
-export function autofillHandler(deps: AppDeps): RequestHandler {
+interface PreparedAutofill {
+  schema: FormSchema;
+  extracted: Extracted;
+  signal: AbortSignal;
+}
+
+export function autofillHandlers(deps: AppDeps): { prepare: RequestHandler; answer: RequestHandler } {
   const db = deps.db.db;
   const ai = createAiClient(deps.config.ai);
-  return async (req, res) => {
-    const slug = z.string().safeParse(req.params.slug);
-    const form = slug.success ? (await db.select().from(forms).where(eq(forms.slug, slug.data)).limit(1))[0] : undefined;
-    const version = form ? await publishedVersion(db, form) : undefined;
-    const settings = form ? formSettingsZ.parse(form.settings) : undefined;
-    if (!form || !version || form.status !== "published" || !settings?.allowAutofill || !aiEnabled(deps)) {
-      res.status(404).json({ error: "not_found" });
-      return;
-    }
-    const body = autofillBodyZ.safeParse(req.body);
-    if (!body.success) {
-      res.status(400).json({ error: "invalid_body" });
-      return;
-    }
-    const data = decodeBase64(body.data.dataBase64);
-    if (!data) {
-      res.status(415).json({ error: "unsupported_file" });
-      return;
-    }
+  const extractor = createExtractor(deps.extraction);
+  const prepared = new WeakMap<Request, PreparedAutofill>();
+
+  const prepare: RequestHandler = async (req, res, next) => {
+    const controller = new AbortController();
+    const signal = controller.signal;
+    res.on("close", () => {
+      if (!res.writableFinished) controller.abort();
+    });
+    const ended = (): boolean => signal.aborted || res.writableEnded;
     try {
-      const extracted = await extractUpload({ filename: body.data.filename, mimeType: body.data.mimeType, data });
-      const raw = await ai.completeJson(autofillMessages(version.schema, extracted));
-      const answers = keepAnswers(version.schema, raw);
-      res.json({ answers, filled: Object.keys(answers).length });
+      const slug = z.string().safeParse(req.params.slug);
+      const form = slug.success ? (await db.select().from(forms).where(eq(forms.slug, slug.data)).limit(1))[0] : undefined;
+      const version = form ? await publishedVersion(db, form) : undefined;
+      const settings = form ? formSettingsZ.parse(form.settings) : undefined;
+      if (!form || !version || form.status !== "published" || !settings?.allowAutofill || !aiEnabled(deps)) {
+        if (!ended()) res.status(404).json({ error: "not_found" });
+        return;
+      }
+      const body = autofillBodyZ.safeParse(req.body);
+      if (!body.success) {
+        if (!ended()) res.status(400).json({ error: "invalid_body" });
+        return;
+      }
+      const data = decodeBase64(body.data.dataBase64);
+      if (!data) {
+        if (!ended()) res.status(415).json({ error: "unsupported_file" });
+        return;
+      }
+      if (ended()) return;
+      const extracted = await extractUpload(
+        { filename: body.data.filename, mimeType: body.data.mimeType, data },
+        extractor,
+        signal,
+      );
+      if (ended()) return;
+      prepared.set(req, { schema: version.schema, extracted, signal });
+      next();
     } catch (error) {
+      if (ended()) return;
       if (error instanceof ExtractError) {
         sendExtractError(res, error);
         return;
       }
+      throw error;
+    }
+  };
+
+  const answer: RequestHandler = async (req, res) => {
+    const ready = prepared.get(req);
+    prepared.delete(req);
+    if (ready === undefined) throw new Error("autofill prepare did not store a result");
+    if (ready.signal.aborted || res.writableEnded) return;
+    try {
+      const raw = await ai.completeJson(autofillMessages(ready.schema, ready.extracted));
+      if (ready.signal.aborted || res.writableEnded) return;
+      const answers = keepAnswers(ready.schema, raw);
+      res.json({ answers, filled: Object.keys(answers).length });
+    } catch (error) {
+      if (ready.signal.aborted || res.writableEnded) return;
       if (error instanceof AiError) {
         sendAiError(res, error);
         return;
@@ -357,4 +405,6 @@ export function autofillHandler(deps: AppDeps): RequestHandler {
       throw error;
     }
   };
+
+  return { prepare, answer };
 }

@@ -229,3 +229,39 @@ mkdir -p /tmp/friendform-docx/word /tmp/friendform-docx/_rels
 Expected value change. `tests/server/public.test.ts` "returns only the public field set..." still publishes the form with `allowAutofill: true`. The public GET now returns `settings.allowAutofill && aiEnabled`. `createTestApp` leaves AI unset, so the expected `settings.allowAutofill` changed from `true` to `false`. The assertion was not removed. A separate test covers AI on: the public GET returns true when the setting is on and false when it is off.
 
 Test sensitivity. Removing `if (type === undefined) continue;` from the generate-form repair made `tests/server/ai.test.ts` "repairs a draft and keeps the description out of the system prompt" fail: expected status 200, received 502. The line was restored before verification.
+
+## Slice 3b: bounded extraction and autofill quotas
+
+PDF and Word extraction run in one child process. The server still checks the 5 MB limit and the file signature before a child starts. Text files and images stay in the server process. unpdf and mammoth are imported only by `server/extract-child.ts`.
+
+The parent forks with `serialization: "advanced"` and an environment that contains only `PATH`, so the database URL and the AI key are not copied. The child is killed with SIGKILL on a 15 second timeout, when resident memory goes over 512 MB, on a crash, and when the respondent disconnects. The busy flag clears when that child has exited. A second extraction gets 503 `{ error: "busy" }` and `Retry-After: 5`. On Linux the child writes `1000` to `/proc/self/oom_score_adj` inside try/catch.
+
+PDF text matches unpdf 1.8.1 `extractText` with `mergePages`. Each item contributes `item.str` plus a newline when `hasEOL` is set. Pages join with a newline, then `normalizeMergedText` runs its three replacements: collapse spaces, trim spaces around newlines, and collapse three or more newlines to two. Reading stops once that raw joined text passes 40,000 characters, and the normalized text is cut to 40,000. At most 30 pages are read. pdf.js inside unpdf 1.8.1 rejects a Node `Buffer` (`Please provide binary data as Uint8Array, rather than Buffer`), so the child copies the bytes with `new Uint8Array(data)` before `getDocumentProxy`. The installed `PDFDocumentProxy` type has no `destroy` method. The child closes the document with `loadingTask.destroy()`, the same call unpdf's `withDocument` uses. Word text is `mammoth.extractRawText`, cut to 40,000 characters.
+
+`process.send` has to be called as a method. Copying it off `process` and calling the bare function throws `Cannot read properties of undefined (reading 'connected')`. The child then exits without a reply, and the parent reports `too_complex`.
+
+Four existing tests in `tests/server/extract-text.test.ts` counted calls to unpdf's `getDocumentProxy` through a `vi.mock` in the server process. PDF parsing moved to the child on purpose, so those counts read 0 whatever the code did, and "reads a PDF and turns a malformed PDF into unsupported" failed. The architect replaced the mock with a counting wrapper around a real extractor and asserts the PDF jobs handed to the child: 0 for a PNG labeled as a PDF, 1 for the sample PDF, 2 for the two malformed PDFs, 0 for a text file that starts with %PDF, and 0 for a PDF over 5 MB. The expected numbers are unchanged; only what is counted changed.
+
+The per-form daily autofill quota runs after prepare. A file rejected before the model does not use it. A request that reaches the model still uses it when the reply is not JSON. `autofillPerDayPerIp` defaults to 20 and is the second autofill middleware, before the body is read. The 7 MB JSON parser sits on the autofill route after the two per-address limiters. The app-wide 512kb parser calls `next()` without reading a POST whose path matches `/^\/api\/public\/forms\/[^/]+\/autofill$/`. Every other request still uses that 512kb parser.
+
+esbuild 0.25.12 accepts the `name=path` entry form. The build writes `dist/server.mjs` and `dist/extract-child.mjs`. `start` is still `node dist/server.mjs`. `check:extract` requires `dist/extract-child.mjs` and runs `tests/fixtures/sample.pdf` and `tests/fixtures/sample.docx` through `createExtractor({ childPath })`. It exits 1 unless the PDF text contains `Hello` and the Word text contains `document`, words the extract-text tests already expect from those fixtures.
+
+The autofill test helper sets `autofillPerDayPerIp` to 1000 unless a test passes its own value. Existing cases stay under the new default of 20 either way. The explicit 1000 keeps the helper from depending on that default.
+
+No new dependencies. Receipts from `registry.npmjs.org` on 2026-10-21:
+
+- unpdf, maintainer johannschopplich. First release 0.1.0 on 2023-08-11. Latest 1.9.1 on 2026-10-19. Pinned 1.8.1 published 2026-08-13.
+- mammoth, maintainer mwilliamson. First release 0.1.0 on 2013-05-06. Latest and pinned 1.13.0 published 2026-09-26.
+- esbuild, maintainer esbuild. First release 0.0.0 on 2017-11-26. Latest 0.28.2 on 2026-08-08. Pinned 0.25.12 published 2025-11-01.
+
+Verification on 2026-10-21 at 21:02 by the architect, after that test change: node 27 files and 152 tests, client 12 files and 63 tests, twice on PGlite and once on Postgres, all passing. `bun run build` wrote `dist/server.mjs` and `dist/extract-child.mjs`; `check:boot` and `check:extract` passed; the own-code typecheck finished with no error outside `node_modules/`; `db:generate` found no schema changes; the scrub check found nothing. The lane's earlier run stopped at the failing count test described above.
+
+Test sensitivity, each mutation restored before the next:
+
+- Removing the RSS kill made `kills a child that grows past the memory cap` fail (20085ms, not under 10s) and `kills a PDF that inflates past the memory cap` fail (`empty` instead of `too_complex`).
+- Removing the timeout kill made `kills a child that does not reply before the timeout` time out at 20000ms.
+- Moving the per-form daily limiter in front of prepare made `keeps the daily form quota when an upload is rejected before the model` fail (429 instead of 200).
+- Removing the per-address daily limiter made `rate limits autofill per address across a day` fail (502 instead of 429).
+- Putting the 7 MB parser back at app level made `rejects a second oversized autofill body with 429 before reading it` fail (413 instead of 429).
+- Removing the busy check made `returns busy while another file is being read` fail (422 instead of 503) and `rejects a second job while one is running and accepts a job after it ends` time out.
+- Removing the PDF signature check made `rejects a mislabeled PDF and Word upload before starting a child` fail (the spy resolved text instead of rejecting).

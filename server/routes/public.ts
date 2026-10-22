@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { rateLimit } from "express-rate-limit";
-import { Router, type Request, type Response } from "express";
+import express, { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { formSettingsZ } from "../../shared/form-schema";
 import { validateResponses } from "../../shared/validate";
@@ -9,7 +9,7 @@ import { DEFAULT_LIMITS, type AppDeps } from "../app";
 import { forms, formEvents, submissions, type SubmissionMeta } from "../db/schema";
 import { publishedVersion } from "../forms-service";
 import { log } from "../log";
-import { autofillHandler } from "./ai";
+import { autofillHandlers } from "./ai";
 import { emptyQuery, limiter } from "../security";
 import { deliverWebhook, recordDelivery } from "../webhooks";
 
@@ -65,7 +65,16 @@ export function publicRouter(deps: AppDeps): Router {
         },
       });
     });
-  router.post("/:slug/autofill", limiter(limits.autofillPer15MinPerForm, 15 * 60_000, true), autofillPerDay, autofillHandler(deps));
+  const { prepare, answer } = autofillHandlers(deps);
+  router.post(
+    "/:slug/autofill",
+    limiter(limits.autofillPer15MinPerForm, 15 * 60_000, true),
+    limiter(limits.autofillPerDayPerIp, 24 * 60 * 60 * 1000),
+    express.json({ limit: "7mb" }),
+    prepare,
+    autofillPerDay,
+    answer,
+  );
   router.post("/:slug/submissions", limiter(limits.submitPer15MinPerForm, 15 * 60_000, true), async (req, res) => {
     const body = submissionZ.safeParse(req.body);
     if (!body.success) { res.status(400).json({ error: "invalid_body" }); return; }

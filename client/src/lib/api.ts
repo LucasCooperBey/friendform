@@ -56,6 +56,8 @@ const ERROR_TEXT: Record<string, string> = {
   forbidden_origin: "The request was blocked.",
   unsupported_media_type: "That request was not accepted.",
   payload_too_large: "That request is too large.",
+  file_too_complex: "That file is too complex to read. Try a smaller file or a photo of the page.",
+  busy: "Another file is being read right now. Try again in a moment.",
   not_published: "Publish the form first.",
   not_publishable: "This form is not ready to publish.",
   closed: "This form is no longer accepting responses.",
