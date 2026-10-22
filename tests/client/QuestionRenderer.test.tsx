@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { Question, ResponseValue } from "@shared/form-schema";
+import { PublicFormView } from "@/components/public-form/PublicFormView";
 import { QuestionRenderer } from "@/components/public-form/QuestionRenderer";
 
 function Harness({ question, error }: { question: Question; error?: string }) {
@@ -202,5 +203,51 @@ describe("QuestionRenderer", () => {
     expect(input).toHaveAttribute("aria-describedby", "name-error");
     expect(screen.getByText("Enter your name.")).toBeInTheDocument();
     expect(screen.getByText("required")).toBeInTheDocument();
+  });
+
+  // source: number text such as 5,5, 1e3, and 1. shows Enter a number and blocks submit
+  it("rejects number text that is not a plain number", async () => {
+    const user = userEvent.setup();
+    render(
+      <PublicFormView
+        mode="preview"
+        form={{
+          title: "Count form",
+          description: "",
+          schema: {
+            sections: [{
+              title: "Numbers",
+              questions: [{ questionId: "count", type: "number", prompt: "Count", required: false }],
+            }],
+          },
+          settings: {
+            theme: "light",
+            showProgress: false,
+            thankYou: { title: "Thanks", message: "Saved" },
+          },
+        }}
+      />,
+    );
+    const input = screen.getByLabelText("Count");
+    await user.type(input, "5");
+    await user.type(input, ",5");
+    expect(input).toHaveValue("5,5");
+    expect(screen.getByText("Enter a number.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    expect(screen.queryByRole("heading", { name: "Thanks" })).not.toBeInTheDocument();
+    expect(screen.getByText("Some answers need attention.")).toBeInTheDocument();
+    await user.clear(input);
+    await user.type(input, "1e3");
+    expect(input).toHaveValue("1e3");
+    expect(screen.getByText("Enter a number.")).toBeInTheDocument();
+    await user.clear(input);
+    await user.type(input, "1.");
+    expect(input).toHaveValue("1.");
+    expect(screen.getByText("Enter a number.")).toBeInTheDocument();
+    await user.type(input, "5");
+    expect(input).toHaveValue("1.5");
+    expect(screen.queryByText("Enter a number.")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    expect(await screen.findByRole("heading", { name: "Thanks" })).toBeInTheDocument();
   });
 });

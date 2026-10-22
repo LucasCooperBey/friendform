@@ -153,7 +153,7 @@ const thankYouZ = z.object({
 
 const webhookZ = z.object({
   id: z.string().min(1).max(64),
-  url: z.string().max(2000).refine(isHttpUrl, "Enter an http or https URL."),
+  url: z.string().max(2000).refine((value) => value === "" || isHttpUrl(value), "Enter an http or https URL."),
   format: z.enum(["json", "slack", "discord"]),
   enabled: z.boolean(),
 });

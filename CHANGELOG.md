@@ -21,3 +21,16 @@
 - A rating whose answers cannot fall in its range, and a checkbox maximum below 1, cannot be published.
 - The Docker health check and the published compose port follow PORT, and 3000 remains the default.
 - The README covers per-address rate limits, sessions that last 30 days, webhook hosts, production headers, and the Docker data folder.
+- The hidden field on a public form uses a name and label that password managers do not fill in.
+- An owner can turn off document fill when that setting is already on, even while AI is off.
+- A webhook can be added before its URL is entered, and a webhook with an empty URL is not sent.
+- Send test saves the form first, and a failed save is shown instead of testing an unsaved URL.
+- Turning a question condition back on keeps the condition that was already there.
+- While a restore is running, every Restore button is disabled.
+- A network problem or a server error during a session check keeps the owner signed in.
+- The document-fill message counts the answers that were actually applied.
+- Leaving the editor saves edits that differ from the last successful save, including after a failed save.
+- Previewing the thank-you page stays in the editor and shows where a redirect would go.
+- The redirect countdown says how many seconds are left.
+- A number that is not a plain number must be corrected before the form can be submitted.
+- Deleting a form refreshes the form list and drops that form from the cache.

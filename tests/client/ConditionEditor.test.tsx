@@ -64,4 +64,24 @@ describe("ConditionEditor", () => {
     expect(screen.getByRole("option", { name: "includes" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "contains" })).not.toBeInTheDocument();
   });
+
+  // source: turning a condition back on restores the condition kept while it was off
+  it("restores the condition that was turned off", async () => {
+    const user = userEvent.setup();
+    render(<Host />);
+    const third = screen.getByRole("article", { name: "Third" });
+    await user.click(within(third).getByRole("button", { name: "Edit Third" }));
+    await user.click(within(third).getByRole("switch", { name: /Only show this question when/ }));
+    await user.click(within(third).getByRole("combobox", { name: "Controlling question" }));
+    await user.click(screen.getByRole("option", { name: "Second" }));
+    await user.click(within(third).getByRole("combobox", { name: "Comparison value" }));
+    await user.click(screen.getByRole("option", { name: "Blue" }));
+    expect(within(third).getByRole("combobox", { name: "Operator" })).toHaveTextContent("includes");
+    await user.click(within(third).getByRole("switch", { name: /Only show this question when/ }));
+    expect(within(third).queryByRole("combobox", { name: "Controlling question" })).not.toBeInTheDocument();
+    await user.click(within(third).getByRole("switch", { name: /Only show this question when/ }));
+    expect(within(third).getByRole("combobox", { name: "Controlling question" })).toHaveTextContent("Second");
+    expect(within(third).getByRole("combobox", { name: "Operator" })).toHaveTextContent("includes");
+    expect(within(third).getByRole("combobox", { name: "Comparison value" })).toHaveTextContent("Blue");
+  });
 });

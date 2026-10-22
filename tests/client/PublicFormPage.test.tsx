@@ -2,8 +2,9 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import type { FormSchema } from "@shared/form-schema";
+import type { FormSchema, ThankYouSettings } from "@shared/form-schema";
 import { App } from "@/App";
+import { PublicFormView } from "@/components/public-form/PublicFormView";
 import { isRecord } from "@/lib/utils";
 import { callsTo, mockRoute } from "./fetch-mock";
 
@@ -203,11 +204,82 @@ describe("PublicFormPage", () => {
     mockOpenForm();
     renderAt("/f/hello");
     await screen.findByRole("heading", { name: "Hello form" });
-    const field = document.querySelector("input[name='website']");
+    const field = document.querySelector("input[name='ff-leave-blank']");
     if (!(field instanceof HTMLInputElement)) throw new Error("honeypot missing");
     expect(field.value).toBe("");
     expect(field.tabIndex).toBe(-1);
     expect(field.autocomplete).toBe("off");
     expect(field.parentElement?.getAttribute("aria-hidden")).toBe("true");
+    expect(field.getAttribute("data-1p-ignore")).not.toBeNull();
+    expect(field.getAttribute("data-lpignore")).toBe("true");
+  });
+
+  // source: the honeypot name, id, and label avoid autofill words, and the field sets data-1p-ignore, data-lpignore, and data-bwignore
+  it("hides the honeypot from password managers", async () => {
+    mockOpenForm();
+    renderAt("/f/hello");
+    await screen.findByRole("heading", { name: "Hello form" });
+    const field = document.querySelector("input[name='ff-leave-blank']");
+    if (!(field instanceof HTMLInputElement)) throw new Error("honeypot missing");
+    expect(field.id).toBe("ff-leave-blank");
+    expect(field.name).toBe("ff-leave-blank");
+    expect(field.labels?.[0]?.textContent).toBe("Leave blank");
+    const label = `${field.name} ${field.id} ${field.labels?.[0]?.textContent ?? ""}`.toLowerCase();
+    for (const word of ["website", "url", "name", "email", "phone", "address", "company"]) {
+      expect(label).not.toContain(word);
+    }
+    expect(field.getAttribute("data-1p-ignore")).toBe("true");
+    expect(field.getAttribute("data-lpignore")).toBe("true");
+    expect(field.getAttribute("data-bwignore")).toBe("true");
+    expect(field.autocomplete).toBe("off");
+    expect(field.tabIndex).toBe(-1);
+    expect(field.parentElement?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  function renderRedirect(mode: "live" | "preview", delay: number) {
+    const thankYou: ThankYouSettings = {
+      title: "Thanks",
+      message: "Saved",
+      redirectUrl: "https://example.com/next",
+      redirectDelaySeconds: delay,
+    };
+    return render(
+      <PublicFormView
+        mode={mode}
+        onSubmit={async () => ({ ok: true })}
+        form={{
+          title: "Hello form",
+          description: "",
+          schema: {
+            sections: [{
+              title: "About",
+              questions: [{ questionId: "name", type: "text", prompt: "Your name", required: false }],
+            }],
+          },
+          settings: { theme: "light", showProgress: false, thankYou },
+        }}
+      />,
+    );
+  }
+
+  // source: a preview thank-you page shows the destination and does not leave the editor
+  it("shows where a preview would redirect without leaving the page", async () => {
+    const before = window.location.href;
+    const user = userEvent.setup();
+    renderRedirect("preview", 0);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    expect(await screen.findByText("People would be sent to https://example.com/next")).toBeInTheDocument();
+    expect(screen.queryByText(/Redirecting in/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Taking you onward/)).not.toBeInTheDocument();
+    expect(window.location.href).toBe(before);
+  });
+
+  // source: the thank-you countdown says Redirecting in N seconds
+  it("counts a live redirect down in seconds", async () => {
+    const user = userEvent.setup();
+    renderRedirect("live", 4);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    expect(await screen.findByText("Redirecting in 4 seconds.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Continue now" })).toHaveAttribute("href", "https://example.com/next");
   });
 });

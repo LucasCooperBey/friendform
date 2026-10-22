@@ -5,7 +5,7 @@ import { validateResponses } from "@shared/validate";
 import { Collapse } from "@/components/public-form/Collapse";
 import { FormProgress } from "@/components/public-form/FormProgress";
 import { QuestionRenderer } from "@/components/public-form/QuestionRenderer";
-import { AutofillButton } from "@/components/public-form/AutofillButton";
+import { AutofillButton, filledToast } from "@/components/public-form/AutofillButton";
 import { ThankYou } from "@/components/public-form/ThankYou";
 import {
   AlertDialog,
@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { toast } from "@/hooks/use-toast";
 
 export interface PublicFormViewProps {
   form: {
@@ -83,11 +84,15 @@ export function PublicFormView({ form, mode, autofillSlug, onSubmit, onFirstInpu
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [pendingFill, setPendingFill] = useState<Responses | null>(null);
+  const [unparsed, setUnparsed] = useState<Record<string, true>>({});
   const started = useRef(false);
   const responsesRef = useRef(responses);
   responsesRef.current = responses;
   const pendingRef = useRef(pendingFill);
   pendingRef.current = pendingFill;
+  const immediateRef = useRef(0);
+  const unparsedRef = useRef(unparsed);
+  unparsedRef.current = unparsed;
   const showAutofill = mode === "live" && autofillSlug !== undefined && form.settings.allowAutofill === true;
 
   const visible = useMemo(() => visibleQuestionIds(form.schema, responses), [form.schema, responses]);
@@ -109,22 +114,23 @@ export function PublicFormView({ form, mode, autofillSlug, onSubmit, onFirstInpu
     setResponses(next);
   }
 
-  function applyAnswers(incoming: Responses) {
+  function applyAnswers(incoming: Responses): number {
     const current = responsesRef.current;
     const next = { ...current };
-    let changed = false;
+    let applied = 0;
     for (const [id, value] of Object.entries(incoming)) {
       const existing = Object.hasOwn(current, id) ? current[id] : undefined;
       if (sameValue(existing, value)) continue;
       next[id] = value;
-      changed = true;
+      applied += 1;
     }
-    if (!changed) return;
+    if (applied === 0) return 0;
     noteInput();
     writeResponses(next);
+    return applied;
   }
 
-  function onFill(incoming: Responses) {
+  function onFill(incoming: Responses): { pending: boolean } {
     const current = responsesRef.current;
     const safe: Responses = {};
     const conflicts: Responses = {};
@@ -134,18 +140,36 @@ export function PublicFormView({ form, mode, autofillSlug, onSubmit, onFirstInpu
       if (typed && !sameValue(existing, value)) conflicts[id] = value;
       else safe[id] = value;
     }
-    applyAnswers(safe);
+    const applied = applyAnswers(safe);
     if (Object.keys(conflicts).length > 0) {
+      immediateRef.current = applied;
       pendingRef.current = conflicts;
       setPendingFill(conflicts);
+      return { pending: true };
     }
+    return { pending: false };
   }
 
-  function confirmReplace() {
+  function settleFill(replace: boolean) {
     const pending = pendingRef.current;
+    if (pending === null) return;
     pendingRef.current = null;
+    const base = immediateRef.current;
+    immediateRef.current = 0;
     setPendingFill(null);
-    if (pending) applyAnswers(pending);
+    const added = replace ? applyAnswers(pending) : 0;
+    toast({ title: filledToast(base + added) });
+  }
+
+  function markUnparsed(id: string, flag: boolean) {
+    const current = unparsedRef.current;
+    const has = current[id] === true;
+    if (flag === has) return;
+    const next = { ...current };
+    if (flag) next[id] = true;
+    else delete next[id];
+    unparsedRef.current = next;
+    setUnparsed(next);
   }
 
   function update(id: string, value: ResponseValue | undefined) {
@@ -167,10 +191,14 @@ export function PublicFormView({ form, mode, autofillSlug, onSubmit, onFirstInpu
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const result = validateResponses(form.schema, responses);
-    if (!result.ok) {
-      setErrors(result.errors);
+    const unparsedNow = unparsedRef.current;
+    const hasUnparsed = Object.keys(unparsedNow).length > 0;
+    if (!result.ok || hasUnparsed) {
+      setErrors(result.ok ? {} : result.errors);
       setBanner("Some answers need attention.");
-      const first = allQuestions(form.schema).find((question) => result.errors[question.questionId] !== undefined);
+      const first = allQuestions(form.schema).find(
+        (question) => unparsedNow[question.questionId] === true || (!result.ok && result.errors[question.questionId] !== undefined),
+      );
       if (first) focusQuestion(first.questionId);
       return;
     }
@@ -209,7 +237,7 @@ export function PublicFormView({ form, mode, autofillSlug, onSubmit, onFirstInpu
           </p>
         ) : null}
         {done ? (
-          <ThankYou settings={form.settings.thankYou} />
+          <ThankYou settings={form.settings.thankYou} mode={mode} />
         ) : (
           <div className="space-y-6">
             <header className="space-y-3">
@@ -225,12 +253,15 @@ export function PublicFormView({ form, mode, autofillSlug, onSubmit, onFirstInpu
                 </p>
               ) : null}
               <div className="absolute left-[-10000px]" aria-hidden="true">
-                <label htmlFor="friendform-website">Website</label>
+                <label htmlFor="ff-leave-blank">Leave blank</label>
                 <input
-                  id="friendform-website"
-                  name="website"
+                  id="ff-leave-blank"
+                  name="ff-leave-blank"
                   tabIndex={-1}
                   autoComplete="off"
+                  data-1p-ignore="true"
+                  data-lpignore="true"
+                  data-bwignore="true"
                   value={website}
                   onChange={(event) => setWebsite(event.target.value)}
                 />
@@ -251,7 +282,8 @@ export function PublicFormView({ form, mode, autofillSlug, onSubmit, onFirstInpu
                           question={question}
                           value={readResponse(responses, question.questionId)}
                           onChange={(value) => update(question.questionId, value)}
-                          error={errors[question.questionId]}
+                          onNumberUnparsed={(flag) => markUnparsed(question.questionId, flag)}
+                          error={unparsed[question.questionId] ? "Enter a number." : errors[question.questionId]}
                           disabled={submitting}
                         />
                       </Collapse>
@@ -265,7 +297,7 @@ export function PublicFormView({ form, mode, autofillSlug, onSubmit, onFirstInpu
             </form>
           </div>
         )}
-        <AlertDialog open={pendingFill !== null} onOpenChange={(open) => { if (!open) setPendingFill(null); }}>
+        <AlertDialog open={pendingFill !== null} onOpenChange={(open) => { if (!open) settleFill(false); }}>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Replace answers you already entered?</AlertDialogTitle>
@@ -275,7 +307,7 @@ export function PublicFormView({ form, mode, autofillSlug, onSubmit, onFirstInpu
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={confirmReplace}>Replace</AlertDialogAction>
+              <AlertDialogAction onClick={() => settleFill(true)}>Replace</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>

@@ -51,15 +51,33 @@ export function useSession(): {
   if (query.isPending) {
     return { status: "loading", publicUrl: null, aiEnabled: false, refresh };
   }
-  if (query.isError || !query.data || !query.data.authenticated) {
+  const cached = query.data;
+  if (query.isError) {
+    const keep = cached?.authenticated === true && transientSessionError(query.error);
+    if (keep && cached) {
+      return {
+        status: "authenticated",
+        publicUrl: cached.publicUrl,
+        aiEnabled: cached.aiEnabled,
+        refresh,
+      };
+    }
+    return { status: "anonymous", publicUrl: null, aiEnabled: false, refresh };
+  }
+  if (!cached || !cached.authenticated) {
     return { status: "anonymous", publicUrl: null, aiEnabled: false, refresh };
   }
   return {
     status: "authenticated",
-    publicUrl: query.data.publicUrl,
-    aiEnabled: query.data.aiEnabled,
+    publicUrl: cached.publicUrl,
+    aiEnabled: cached.aiEnabled,
     refresh,
   };
+}
+
+function transientSessionError(error: unknown): boolean {
+  if (error instanceof TypeError) return true;
+  return error instanceof ApiError && error.status >= 500;
 }
 
 export async function signIn(password: string): Promise<void> {

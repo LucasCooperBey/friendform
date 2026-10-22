@@ -186,4 +186,22 @@ describe("SettingsTab document fill", () => {
     await user.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "true");
   });
+
+  // source: the document fill switch stays enabled when AI is off and the setting is already on
+  it("lets the owner turn document fill off when AI is off and it is already on", async () => {
+    const body = detail();
+    body.form.settings = { ...body.form.settings, allowAutofill: true };
+    signedIn(false);
+    mockRoute("GET", "/api/forms/form-1", { body });
+    mockRoute("GET", "/api/forms/form-1/webhooks/deliveries", { body: { deliveries: [] } });
+    mockRoute("PATCH", "/api/forms/form-1", { body });
+    renderAt("/forms/form-1/edit");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("tab", { name: "Settings" }));
+    const toggle = screen.getByRole("switch", { name: "Let people fill this form from a document" });
+    expect(toggle).toBeEnabled();
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+  });
 });

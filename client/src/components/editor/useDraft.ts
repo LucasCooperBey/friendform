@@ -46,6 +46,14 @@ interface PatchBody {
 
 const DEBOUNCE_MS = 800;
 
+const draftFlushers = new Map<string, () => Promise<void>>();
+
+export function flushFormDraft(formId: string): Promise<void> {
+  const flush = draftFlushers.get(formId);
+  if (!flush) return Promise.reject(new Error("Save the form before sending a test."));
+  return flush();
+}
+
 function isStatus(value: unknown): value is FormStatus {
   return value === "draft" || value === "published" || value === "closed";
 }
@@ -185,6 +193,8 @@ export function useDraft(formId: string): {
   const tail = useRef<Promise<void>>(Promise.resolve());
   const mounted = useRef(true);
   const persistRef = useRef<(throwOnInvalid: boolean) => Promise<void>>(async () => undefined);
+  const enqueueRef = useRef<(throwOnInvalid: boolean) => Promise<void>>(async () => undefined);
+  const flushRef = useRef<() => Promise<void>>(async () => undefined);
 
   if (seededFor !== null && seededFor !== formId) {
     if (timer.current) clearTimeout(timer.current);
@@ -287,6 +297,9 @@ export function useDraft(formId: string): {
     return enqueue(true);
   }
 
+  enqueueRef.current = enqueue;
+  flushRef.current = flush;
+
   function retry() {
     if (timer.current) {
       clearTimeout(timer.current);
@@ -318,10 +331,22 @@ export function useDraft(formId: string): {
       if (timer.current) {
         clearTimeout(timer.current);
         timer.current = null;
-        void persistRef.current(false);
+      }
+      const snapshot = draftRef.current;
+      const baseline = savedRef.current;
+      if (snapshot && baseline && !sameDraft(snapshot, baseline)) {
+        void enqueueRef.current(false);
       }
     };
   }, []);
+
+  useEffect(() => {
+    const run = () => flushRef.current();
+    draftFlushers.set(formId, run);
+    return () => {
+      if (draftFlushers.get(formId) === run) draftFlushers.delete(formId);
+    };
+  }, [formId]);
 
   useEffect(() => {
     if (!dirty && saveState !== "saving" && saveState !== "error") return;

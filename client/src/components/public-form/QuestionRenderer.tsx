@@ -15,7 +15,10 @@ export interface QuestionRendererProps {
   onChange: (value: ResponseValue | undefined) => void;
   error?: string;
   disabled?: boolean;
+  onNumberUnparsed?: (unparsed: boolean) => void;
 }
+
+const NUMBER_TEXT = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/;
 
 const TEXT_FIELDS = {
   text: { type: "text", inputMode: "text", autoComplete: "on" },
@@ -74,6 +77,7 @@ function NumberField({
   described,
   invalid,
   disabled,
+  onUnparsed,
 }: {
   question: Question;
   value: ResponseValue | undefined;
@@ -81,15 +85,25 @@ function NumberField({
   described: string | undefined;
   invalid: boolean;
   disabled: boolean | undefined;
+  onUnparsed?: (unparsed: boolean) => void;
 }) {
   const [text, setText] = useState(typeof value === "number" ? String(value) : "");
   const emitted = useRef(value);
+  const onUnparsedRef = useRef(onUnparsed);
+  onUnparsedRef.current = onUnparsed;
 
   useEffect(() => {
     if (Object.is(value, emitted.current)) return;
     emitted.current = value;
     setText(typeof value === "number" ? String(value) : "");
+    onUnparsedRef.current?.(false);
   }, [value]);
+
+  function clearStored() {
+    if (emitted.current === undefined) return;
+    emitted.current = undefined;
+    onChange(undefined);
+  }
 
   return (
     <Input
@@ -108,11 +122,21 @@ function NumberField({
         if (trimmed === "") {
           emitted.current = undefined;
           onChange(undefined);
+          onUnparsedRef.current?.(false);
           return;
         }
-        if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(trimmed)) return;
+        if (!NUMBER_TEXT.test(trimmed)) {
+          clearStored();
+          onUnparsedRef.current?.(true);
+          return;
+        }
         const parsed = Number(trimmed);
-        if (!Number.isFinite(parsed)) return;
+        if (!Number.isFinite(parsed)) {
+          clearStored();
+          onUnparsedRef.current?.(true);
+          return;
+        }
+        onUnparsedRef.current?.(false);
         emitted.current = parsed;
         onChange(parsed);
       }}
@@ -266,7 +290,7 @@ function RatingField({
 }
 
 function Control(props: QuestionRendererProps & { described: string | undefined; invalid: boolean }) {
-  const { question, value, onChange, disabled, described, invalid } = props;
+  const { question, value, onChange, disabled, described, invalid, onNumberUnparsed } = props;
   const options = question.metadata?.options ?? [];
 
   switch (question.type) {
@@ -310,6 +334,7 @@ function Control(props: QuestionRendererProps & { described: string | undefined;
           described={described}
           invalid={invalid}
           disabled={disabled}
+          onUnparsed={onNumberUnparsed}
         />
       );
     case "date":

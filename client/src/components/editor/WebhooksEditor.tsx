@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { randomId } from "@/lib/ids";
+import { flushFormDraft } from "@/components/editor/useDraft";
 
 const WEBHOOK_LIMIT = 10;
 
@@ -93,6 +94,7 @@ export function WebhooksEditor({
   async function sendTest(webhookId: string) {
     setTesting(webhookId);
     try {
+      await flushFormDraft(formId);
       const result = readTest(
         await api<unknown>(`/api/forms/${encodeURIComponent(formId)}/webhooks/${encodeURIComponent(webhookId)}/test`, {
           method: "POST",
@@ -153,8 +155,13 @@ export function WebhooksEditor({
                   onCheckedChange={(checked) => updateHook(hook.id, { enabled: checked === true })}
                 />
               </div>
+              {hook.url.trim() === "" ? <p className="text-sm text-muted-foreground">Add a URL to send this webhook.</p> : null}
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" disabled={testing === hook.id} onClick={() => void sendTest(hook.id)}>
+                <Button
+                  variant="outline"
+                  disabled={testing === hook.id || hook.url.trim() === ""}
+                  onClick={() => void sendTest(hook.id)}
+                >
                   Send test
                 </Button>
                 <Button variant="outline" onClick={() => onChange(webhooks.filter((item) => item.id !== hook.id))}>

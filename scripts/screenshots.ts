@@ -207,13 +207,45 @@ async function createPublished(cookie: string, template: FormTemplate, schema: F
   return created;
 }
 
-async function submitPublic(slug: string, responses: Record<string, string | number>): Promise<void> {
-  const response = await fetch(`${BASE}/api/public/forms/${slug}/submissions`, {
+const SESSION_RE = /^[A-Za-z0-9_-]{8,64}$/;
+
+function demoSessionId(label: string): string {
+  const sessionId = `shot_${label}`;
+  if (!SESSION_RE.test(sessionId)) throw new Error(`session id ${sessionId} is not valid`);
+  return sessionId;
+}
+
+async function postPublic(pathname: string, body: unknown, ok: number): Promise<void> {
+  const response = await fetch(`${BASE}${pathname}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Origin: BASE },
-    body: JSON.stringify({ responses }),
+    body: JSON.stringify(body),
   });
-  if (response.status !== 201) throw new Error(`submission returned ${response.status} ${await response.text()}`);
+  if (response.status !== ok) throw new Error(`${pathname} returned ${response.status} ${await response.text()}`);
+}
+
+async function postEvent(slug: string, type: "view" | "start", sessionId: string): Promise<void> {
+  await postPublic(`/api/public/forms/${encodeURIComponent(slug)}/events`, { type, sessionId }, 204);
+}
+
+async function submitPublic(slug: string, sessionId: string, responses: Record<string, string | number>): Promise<void> {
+  await postPublic(`/api/public/forms/${encodeURIComponent(slug)}/submissions`, { responses, sessionId }, 201);
+}
+
+async function seedRespondent(
+  slug: string,
+  label: string,
+  index: number,
+  responses: Record<string, string | number>,
+): Promise<void> {
+  const sessionId = demoSessionId(`${label}_${index}`);
+  await postEvent(slug, "view", sessionId);
+  await postEvent(slug, "start", sessionId);
+  await submitPublic(slug, sessionId, responses);
+}
+
+async function seedViewer(slug: string, label: string): Promise<void> {
+  await postEvent(slug, "view", demoSessionId(`${label}_view`));
 }
 
 async function seed(cookie: string): Promise<{ potluck: SeededForm; intake: SeededForm }> {
@@ -221,8 +253,8 @@ async function seed(cookie: string): Promise<{ potluck: SeededForm; intake: Seed
   const intakeTemplate = templateById("project-intake");
   const potluck = await createPublished(cookie, potluckTemplate, potluckTemplate.schema);
   const intake = await createPublished(cookie, intakeTemplate, withReachCondition(intakeTemplate.schema));
-  for (const person of PEOPLE) {
-    await submitPublic(potluck.slug, {
+  for (const [index, person] of PEOPLE.entries()) {
+    await seedRespondent(potluck.slug, "potluck", index, {
       name: person.name,
       email: person.email,
       party_size: person.party,
@@ -230,13 +262,15 @@ async function seed(cookie: string): Promise<{ potluck: SeededForm; intake: Seed
       category: person.category,
     });
   }
-  for (const project of PROJECTS) {
-    await submitPublic(intake.slug, {
+  await seedViewer(potluck.slug, "potluck");
+  for (const [index, project] of PROJECTS.entries()) {
+    await seedRespondent(intake.slug, "intake", index, {
       name: project.name,
       outcome: project.outcome,
       keep_answers: "Yes",
     });
   }
+  await seedViewer(intake.slug, "intake");
   return { potluck, intake };
 }
 

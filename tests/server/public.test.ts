@@ -251,3 +251,27 @@ it("logs one warning for a honeypot submission and stores nothing", async () => 
     spy.mockRestore();
   }
 });
+
+it("does not deliver an enabled webhook whose URL is empty", async () => {
+  // source: an enabled webhook with an empty URL is not sent, and a webhook with a URL still is
+  const sink = await listenSink();
+  const urls: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    urls.push(url);
+    return new Response(null, { status: 204 });
+  };
+  app = await createTestApp({ fetchImpl });
+  await app.login();
+  const form = await publishForm(app, {
+    settings: {
+      webhooks: [
+        { id: "blank", url: "", format: "json", enabled: true },
+        { id: "live", url: sink.url, format: "json", enabled: true },
+      ],
+    },
+  });
+  expect((await app.request(`/api/public/forms/${form.slug}/submissions`, jsonBody({ responses: { name: "Ada" } }))).status).toBe(201);
+  await Promise.all(app.tasks);
+  expect(urls).toEqual([sink.url]);
+});

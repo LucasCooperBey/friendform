@@ -6,7 +6,7 @@ import { DEFAULT_SETTINGS, emptySchema } from "@shared/form-schema";
 import { App } from "@/App";
 import type { FormDetail } from "@/components/editor/useDraft";
 import { isRecord } from "@/lib/utils";
-import { callsTo, mockRoute } from "./fetch-mock";
+import { callsTo, mockRoute, type MockResponse } from "./fetch-mock";
 
 const ISO = "2026-04-01T12:00:00.000Z";
 
@@ -150,5 +150,40 @@ describe("EditorPage", () => {
     expect(await screen.findByText("Version 3 copied into your draft. Publish to make it live.")).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Questions" }));
     expect(await screen.findByText("Restored question")).toBeInTheDocument();
+  });
+
+  // source: every Restore button is disabled while one restore is running
+  it("disables every restore button while one restore runs", async () => {
+    const user = userEvent.setup();
+    let release: (value: MockResponse) => void = () => undefined;
+    mockRoute("GET", "/api/forms/form-1/versions", {
+      body: {
+        versions: [
+          { id: "version-2", version: 2, publishedAt: ISO, questionCount: 1 },
+          { id: "version-1", version: 1, publishedAt: ISO, questionCount: 2 },
+        ],
+      },
+    });
+    mockRoute("POST", "/api/forms/form-1/versions/version-2/restore", () => new Promise((resolve) => {
+      release = resolve;
+    }));
+    renderEditor();
+    await user.click(await screen.findByRole("tab", { name: "History" }));
+    const buttons = await screen.findAllByRole("button", { name: "Restore to draft" });
+    expect(buttons).toHaveLength(2);
+    const first = buttons[0];
+    if (!first) throw new Error("missing restore button");
+    await user.click(first);
+    await waitFor(() => {
+      const busy = screen.getAllByRole("button", { name: "Restore to draft" });
+      expect(busy[0]).toBeDisabled();
+      expect(busy[1]).toBeDisabled();
+    });
+    release({ body: { form: detail() } });
+    await waitFor(() => {
+      const later = screen.getAllByRole("button", { name: "Restore to draft" });
+      expect(later[0]).toBeEnabled();
+      expect(later[1]).toBeEnabled();
+    });
   });
 });

@@ -35,6 +35,16 @@ function liveForm(allowAutofill: boolean) {
   };
 }
 
+function openToast(text: string): HTMLElement | undefined {
+  return screen.queryAllByText(text).find((node) => node.closest("[data-state='open']") !== null);
+}
+
+async function dismissOpenToasts(user: ReturnType<typeof userEvent.setup>) {
+  for (const close of screen.queryAllByRole("button", { name: "Close" })) {
+    if (close.closest("[data-state='open']")) await user.click(close);
+  }
+}
+
 function renderLive(options: { allowAutofill?: boolean; slug?: string; mode?: "live" | "preview"; onFirstInput?: () => void } = {}) {
   const slug = "slug" in options ? options.slug : "hello";
   return render(
@@ -110,6 +120,40 @@ describe("AutofillButton", () => {
     await user.click(await screen.findByRole("button", { name: "Replace" }));
     expect(screen.getByLabelText(/Your name/)).toHaveValue("Ada");
     expect(onFirstInput).toHaveBeenCalledTimes(1);
+  });
+
+  // source: the fill toast counts answers applied at once, and conflicting answers only after Replace
+  it("counts a conflicting answer only after Replace", async () => {
+    mockRoute("POST", PATH, { body: { answers: { name: "Ada", city: "Paris" }, filled: 2 } });
+    renderLive();
+    const user = userEvent.setup();
+    await dismissOpenToasts(user);
+    await user.type(screen.getByLabelText(/Your name/), "Bea");
+    await user.upload(screen.getByLabelText("Document"), new File(["Ada, Paris"], "notes.txt", { type: "text/plain" }));
+    expect(await screen.findByText("This will replace 1 answer you already entered.")).toBeInTheDocument();
+    expect(openToast("Filled 2 answers. Check them before you submit.")).toBeUndefined();
+    expect(screen.getByRole("textbox", { name: /City/, hidden: true })).toHaveValue("Paris");
+    await user.click(screen.getByRole("button", { name: "Replace" }));
+    expect(screen.getByLabelText(/Your name/)).toHaveValue("Ada");
+    expect(screen.getByLabelText(/City/)).toHaveValue("Paris");
+    expect(await screen.findByText("Filled 2 answers. Check them before you submit.")).toBeInTheDocument();
+  });
+
+  // source: cancelling the replace dialog counts only the answers applied at once
+  it("counts only the answers kept when Replace is cancelled", async () => {
+    mockRoute("POST", PATH, { body: { answers: { name: "Ada", city: "Paris" }, filled: 2 } });
+    renderLive();
+    const user = userEvent.setup();
+    await dismissOpenToasts(user);
+    await user.type(screen.getByLabelText(/Your name/), "Bea");
+    await user.upload(screen.getByLabelText("Document"), new File(["Ada, Paris"], "notes.txt", { type: "text/plain" }));
+    expect(await screen.findByText("This will replace 1 answer you already entered.")).toBeInTheDocument();
+    expect(openToast("Filled 1 answer. Check it before you submit.")).toBeUndefined();
+    expect(openToast("Filled 2 answers. Check them before you submit.")).toBeUndefined();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(openToast("Filled 1 answer. Check it before you submit.")).toBeDefined();
+    expect(screen.getByLabelText(/Your name/)).toHaveValue("Bea");
+    expect(screen.getByLabelText(/City/)).toHaveValue("Paris");
   });
 
   // source: the button is hidden in preview, without the setting, and without a slug.

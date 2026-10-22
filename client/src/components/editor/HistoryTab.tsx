@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, errorMessage } from "@/lib/api";
 import { relativeTime } from "@/lib/format";
@@ -38,6 +38,7 @@ function parseVersions(value: unknown): VersionRow[] {
 
 export function HistoryTab({ formId, onRestore }: { formId: string; onRestore: (form: FormDetail) => void }) {
   const [restoring, setRestoring] = useState<string | null>(null);
+  const restoringRef = useRef(false);
   const versions = useQuery({
     queryKey: ["form", formId, "versions"],
     queryFn: async ({ signal }) =>
@@ -45,6 +46,8 @@ export function HistoryTab({ formId, onRestore }: { formId: string; onRestore: (
   });
 
   async function restore(version: VersionRow) {
+    if (restoringRef.current) return;
+    restoringRef.current = true;
     setRestoring(version.id);
     try {
       const form = parseFormDetail(
@@ -57,6 +60,7 @@ export function HistoryTab({ formId, onRestore }: { formId: string; onRestore: (
     } catch (error) {
       toast({ title: errorMessage(error) });
     } finally {
+      restoringRef.current = false;
       setRestoring(null);
     }
   }
@@ -74,7 +78,7 @@ export function HistoryTab({ formId, onRestore }: { formId: string; onRestore: (
             <p className="text-sm text-muted-foreground">Published {relativeTime(version.publishedAt)}</p>
             <p className="text-sm text-muted-foreground">{version.questionCount === 1 ? "1 question" : `${version.questionCount} questions`}</p>
           </div>
-          <Button variant="outline" disabled={restoring === version.id} onClick={() => void restore(version)}>
+          <Button variant="outline" disabled={restoring !== null} onClick={() => void restore(version)}>
             Restore to draft
           </Button>
         </li>

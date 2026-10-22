@@ -12,28 +12,29 @@ function httpUrl(value: string | undefined): string | null {
   return null;
 }
 
-export function ThankYou({ settings }: { settings: ThankYouSettings }) {
+export function ThankYou({ settings, mode }: { settings: ThankYouSettings; mode: "live" | "preview" }) {
   const redirect = httpUrl(settings.redirectUrl);
   const delay = settings.redirectDelaySeconds ?? 3;
   const [left, setLeft] = useState(delay);
 
   useEffect(() => {
-    if (!redirect) return;
+    if (mode === "preview" || !redirect) return;
     if (left <= 0) {
       window.location.assign(redirect);
       return;
     }
     const timer = window.setTimeout(() => setLeft((current) => current - 1), 1000);
     return () => window.clearTimeout(timer);
-  }, [redirect, left]);
+  }, [mode, redirect, left]);
 
   return (
     <div className="space-y-4 rounded-lg border bg-card p-6 text-card-foreground">
       <h2 className="text-2xl font-semibold tracking-tight">{settings.title}</h2>
       <p className="whitespace-pre-wrap text-base">{settings.message}</p>
-      {redirect ? (
+      {redirect && mode === "preview" ? <p>People would be sent to {redirect}</p> : null}
+      {redirect && mode === "live" ? (
         <div className="space-y-2">
-          <p>Taking you onward in {left}s</p>
+          <p>Redirecting in {left} seconds.</p>
           <a
             href={redirect}
             className="font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

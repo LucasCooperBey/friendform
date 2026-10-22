@@ -71,6 +71,10 @@ export function ConditionEditor({
       });
       return;
     }
+    if (logic) {
+      onChange({ ...logic, enabled: true });
+      return;
+    }
     const first = earlier[0];
     const nextOperator = first ? operatorsFor(first.type)[0] ?? "equals" : "equals";
     const value = defaultValue(first, nextOperator);

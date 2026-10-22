@@ -143,6 +143,20 @@ describe("form schema helpers", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("accepts an empty webhook URL", () => {
+    // source: webhookZ accepts an empty URL so a new webhook can be saved before a URL is typed
+    expect(
+      formSettingsZ.safeParse({
+        webhooks: [{ id: "hook", url: "", format: "json", enabled: true }],
+      }).success,
+    ).toBe(true);
+    expect(
+      formSettingsZ.safeParse({
+        webhooks: [{ id: "hook", url: "https://example.com/hook", format: "json", enabled: true }],
+      }).success,
+    ).toBe(true);
+  });
 });
 
 describe("publishProblems", () => {

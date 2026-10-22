@@ -88,6 +88,8 @@ export function SettingsTab({
   async function removeForm() {
     try {
       await api<void>(`/api/forms/${encodeURIComponent(form.id)}`, { method: "DELETE" });
+      await queryClient.invalidateQueries({ queryKey: ["forms"] });
+      queryClient.removeQueries({ queryKey: formQueryKey(form.id) });
       toast({ title: "Form deleted" });
       setLocation("/");
     } catch (error) {
@@ -146,7 +148,7 @@ export function SettingsTab({
           <Switch
             id="allow-autofill"
             checked={settings.allowAutofill}
-            disabled={!aiEnabled}
+            disabled={!aiEnabled && !settings.allowAutofill}
             onCheckedChange={(checked) => onSettings({ ...settings, allowAutofill: checked === true })}
           />
         </div>

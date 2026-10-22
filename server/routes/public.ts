@@ -110,7 +110,7 @@ export function publicRouter(deps: AppDeps): Router {
       return row;
     });
     res.status(201).json({ id: submission.id });
-    for (const hook of form.settings.webhooks.filter((entry) => entry.enabled)) {
+    for (const hook of form.settings.webhooks.filter((entry) => entry.enabled && entry.url.trim() !== "")) {
       const task = (async () => {
         const result = await deliverWebhook(hook, {
           form: { slug: form.slug, title: form.title },

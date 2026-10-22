@@ -123,4 +123,78 @@ describe("useDraft", () => {
     expect(callsTo("PATCH", "/api/forms/form-1")).toHaveLength(2);
     expect(callsTo("PATCH", "/api/forms/form-1")[1]?.body).toEqual({ title: "Renamed" });
   });
+
+  // source: unmount saves a draft that differs from the last saved copy after a failed save
+  it("saves on unmount after a failed save", async () => {
+    let attempts = 0;
+    mockRoute("GET", "/api/forms/form-1", { body: { form: detail() } });
+    mockRoute("PATCH", "/api/forms/form-1", () => {
+      attempts += 1;
+      if (attempts === 1) return { status: 500, body: { error: "server_error" } };
+      return { body: { form: detail({ title: "Renamed" }) } };
+    });
+    const { result, unmount } = renderHook(() => useDraft("form-1"), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.draft?.title).toBe("Hello form"));
+
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        result.current.update({ title: "Renamed" });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(800);
+      });
+      expect(result.current.saveState).toBe("error");
+      expect(callsTo("PATCH", "/api/forms/form-1")).toHaveLength(1);
+      unmount();
+      await act(async () => {
+        await Promise.resolve();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    await waitFor(() => expect(callsTo("PATCH", "/api/forms/form-1")).toHaveLength(2));
+    expect(callsTo("PATCH", "/api/forms/form-1")[1]?.body).toEqual({ title: "Renamed" });
+  });
+
+  // source: unmount queues the save behind an in-flight save instead of sending it at once
+  it("queues an unmount save behind the save already in flight", async () => {
+    let release: (value: { status?: number; body?: unknown }) => void = () => undefined;
+    let patches = 0;
+    mockRoute("GET", "/api/forms/form-1", { body: { form: detail() } });
+    mockRoute("PATCH", "/api/forms/form-1", () => {
+      patches += 1;
+      if (patches === 1) {
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      }
+      return { body: { form: detail({ title: "Second" }) } };
+    });
+    const { result, unmount } = renderHook(() => useDraft("form-1"), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.draft?.title).toBe("Hello form"));
+
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        result.current.update({ title: "First" });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(800);
+      });
+      expect(callsTo("PATCH", "/api/forms/form-1")).toHaveLength(1);
+      act(() => {
+        result.current.update({ title: "Second" });
+      });
+      unmount();
+      expect(callsTo("PATCH", "/api/forms/form-1")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+    await act(async () => {
+      release({ body: { form: detail({ title: "First" }) } });
+    });
+    await waitFor(() => expect(callsTo("PATCH", "/api/forms/form-1")).toHaveLength(2));
+    expect(callsTo("PATCH", "/api/forms/form-1")[1]?.body).toEqual({ title: "Second" });
+  });
 });

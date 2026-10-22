@@ -438,3 +438,67 @@ The eight code fixes above were removed together (the session-secret sentence wa
 `bunx vitest run --project node tests/server/db-pool.test.ts tests/server/forms.test.ts tests/server/csv.test.ts tests/server/ai.test.ts tests/server/stats.test.ts tests/server/public.test.ts tests/shared/form-schema.test.ts tests/server/config.test.ts`
 
 Exit 1. 7 files failed, 1 passed (`tests/server/config.test.ts`). 8 tests failed, 45 passed. The failures were `listenerCount` 0, `csvCell("-1")` returned `'-1`, title patch `settings` was present, closed publish status was `published`, honeypot log lines length 0, `completionRate` 2, publish problems `[]`, and the 400 retry still had `temperature`. The fixes were restored. The same command then exited 0: 8 files, 53 tests.
+
+## Slice 4c: review fixes, client and screenshots
+
+### Honeypot
+
+The hidden input is `id` and `name` `ff-leave-blank`, with the label "Leave blank". It still has `autoComplete="off"`, `tabIndex={-1}`, and an `aria-hidden` wrapper, and now also `data-1p-ignore`, `data-lpignore`, and `data-bwignore`, each `"true"`. The React state and the submission JSON key stay `website`. The existing test `tests/client/PublicFormPage.test.tsx` "renders an empty honeypot" is the one existing test whose selector changed, from `input[name='website']` to `input[name='ff-leave-blank']`. Its assertions are unchanged, and it now also checks `data-1p-ignore` and `data-lpignore`. New test: "hides the honeypot from password managers". Putting the name and label back to `website` failed that test.
+
+### Document fill switch
+
+The switch is disabled only when AI is off and document fill is already off (`disabled={!aiEnabled && !settings.allowAutofill}`). "disables document fill when AI is off" was not edited. New test: "lets the owner turn document fill off when AI is off and it is already on". Restoring `disabled={!aiEnabled}` failed that test.
+
+### Empty webhook URL
+
+`webhookZ` accepts `""` or an http(s) URL. Whitespace-only still fails. Dispatch skips a hook whose trimmed URL is empty. The editor disables Send test while the URL is empty and shows "Add a URL to send this webhook." Tests: "accepts an empty webhook URL", "does not deliver an enabled webhook whose URL is empty" (the recorded fetch URL list was `['']` plus the real sink when the trim check was removed), and "asks for a URL before a webhook can be tested".
+
+### Send test saves first
+
+`useDraft` registers `flushFormDraft(formId)`. Send test awaits that flush and posts only after it resolves. A failed save toasts the save error and does not post. EditorPage is not in the file list, so the flusher lives on the mounted `useDraft`. Test: "does not send a test when the save fails". Removing the `flushFormDraft` call left the test unable to find "The server had a problem. Try again." "adds and removes a webhook and shows the test status" was not edited and passed in the full suite.
+
+### Condition toggle
+
+Turning a condition back on, when one is already stored, sets `enabled: true` on that same object. Test: "restores the condition that was turned off". Removing that branch failed the test.
+
+### Restore buttons
+
+Every Restore button uses `disabled={restoring !== null}`. A ref returns early if a second click arrives before the next paint. Test: "disables every restore button while one restore runs". Limiting `disabled` to the clicked row failed that test.
+
+### Session refetch
+
+A refetch that fails with a `TypeError` or an `ApiError` whose status is 500 or higher keeps a cached authenticated session. A 401, any other error, or a failure with no cached session is anonymous. TanStack Query keeps the previous data and sets status to `error`, and the observer notifies on a timeout, so the 401 test waits for the hook to update. Tests: "keeps the signed-in session when a refetch fails on the network", "keeps the signed-in session when a refetch returns 500", "becomes anonymous when a refetch returns 401", and "stays anonymous when the first session load fails". Making `transientSessionError` return false made both keep tests expect `anonymous` and receive that, so they failed.
+
+### Document fill count
+
+When the fill has no conflicts, the toast still uses the server `filled` count, so "toasts the server filled count" and the e2e line that expects "Filled 1 answer. Check it before you submit." stay as they were. When some answers conflict, nothing is toasted until the dialog closes. Replace counts the answers written immediately plus the conflicting ones that were written. Cancel counts only the ones written immediately. Tests: "counts a conflicting answer only after Replace" and "counts only the answers kept when Replace is cancelled". Toasting `result.filled` before the dialog failed the first. Removing the toast after the dialog failed both.
+
+### Unmount save
+
+On unmount, a pending timer is cleared and the draft is saved through the queue whenever it differs from the last saved baseline, including after a failed save. Tests: "saves on unmount after a failed save" (reverting to "only when a timer is pending" left the PATCH count at 1) and "queues an unmount save behind the save already in flight" (calling `persistRef` directly made the second PATCH start before the first finished, so the count was 2).
+
+### Thank-you preview
+
+`ThankYou` takes `mode`. Preview does not call `window.location.assign`. It shows "People would be sent to {redirect}". Live copy is "Redirecting in {left} seconds." Tests: "shows where a preview would redirect without leaving the page" (dropping the preview guard navigated to `https://example.com/next`) and "counts a live redirect down in seconds" (the old "Taking you onward" sentence was not found).
+
+### Number text
+
+Text that is not a plain number clears the stored number, marks the question unparsed, and shows "Enter a number." Submit is blocked while any question is unparsed, with the banner "Some answers need attention." Test: "rejects number text that is not a plain number". Returning early and keeping the last number failed that test because "Enter a number." was missing.
+
+### Delete form
+
+After a successful delete, the client invalidates `["forms"]` and removes `["form", id]`, then toasts and goes home. Test: "drops the form list and the deleted form after delete". Removing those two calls failed `invalidateQueries` with `{ queryKey: ["forms"] }`.
+
+### Screenshots
+
+Each demo respondent posts `view` and `start` to `/api/public/forms/<slug>/events` with one session id matching `/^[A-Za-z0-9_-]{8,64}$/`, then submits with that same id. Each form also gets one view-only session. `bun run screenshots` exited 0 and rewrote all seven PNGs at 09:23. Git records byte changes for `responses.png`, `forms.png`, and `editor-dark.png`. `editor.png`, `public.png`, `public-mobile.png`, and `public-dark.png` were rewritten with the same bytes as before.
+
+`responses.png` is the Potluck sign-up responses page, Live, with Views 6, Started 3, Responses 3, and Completion rate 50%. Starts equal responses, and the completion rate is under 100%. The table lists Avery Example, Blair Example, and Casey Example. The note under the tiles says "Views and starts count browser sessions."
+
+`editor.png` is the Project intake editor, Live and Published, scrolled to the multiple-choice question "What is the best way to reach you?" Options are Text, Email, and Call. The condition is on: controlling question "What is your name?", operator "is", value "Avery Example".
+
+No server was left listening on port 4174 or 3000.
+
+### Mutation
+
+Each fix was removed on its own, the guarding test was run, and the file was restored from the bytes taken before the edit. All 17 runs exited 1. The restored files matched those bytes. The full `bun run test` then exited 0: node 29 files, 169 tests; client 13 files, 83 tests.

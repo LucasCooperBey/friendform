@@ -64,7 +64,7 @@ function parseFill(value: unknown): { answers: Responses; filled: number } {
   return { answers, filled: value.filled };
 }
 
-function filledToast(filled: number): string {
+export function filledToast(filled: number): string {
   if (filled === 0) return "Nothing in that file matched these questions.";
   if (filled === 1) return "Filled 1 answer. Check it before you submit.";
   return `Filled ${filled} answers. Check them before you submit.`;
@@ -89,7 +89,13 @@ function readBase64(file: File): Promise<string> {
   });
 }
 
-export function AutofillButton({ slug, onFill }: { slug: string; onFill: (answers: Responses) => void }) {
+export function AutofillButton({
+  slug,
+  onFill,
+}: {
+  slug: string;
+  onFill: (answers: Responses) => { pending: boolean };
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const onFillRef = useRef(onFill);
   onFillRef.current = onFill;
@@ -113,8 +119,8 @@ export function AutofillButton({ slug, onFill }: { slug: string; onFill: (answer
         method: "POST",
         body: { filename, mimeType: fileMime(file), dataBase64 },
       }));
-      onFillRef.current(result.answers);
-      toast({ title: filledToast(result.filled) });
+      const outcome = onFillRef.current(result.answers);
+      if (!outcome.pending) toast({ title: filledToast(result.filled) });
     } catch (error) {
       toast({ title: errorMessage(error) });
     } finally {
