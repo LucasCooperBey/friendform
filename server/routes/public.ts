@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { rateLimit } from "express-rate-limit";
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { formSettingsZ } from "../../shared/form-schema";
@@ -8,6 +9,7 @@ import { DEFAULT_LIMITS, type AppDeps } from "../app";
 import { forms, formEvents, submissions, type SubmissionMeta } from "../db/schema";
 import { publishedVersion } from "../forms-service";
 import { log } from "../log";
+import { autofillHandler } from "./ai";
 import { emptyQuery, limiter } from "../security";
 import { deliverWebhook, recordDelivery } from "../webhooks";
 
@@ -22,6 +24,18 @@ export function publicRouter(deps: AppDeps): Router {
   const db = deps.db.db;
   const now = deps.now ?? (() => new Date());
   const limits = { ...DEFAULT_LIMITS, ...deps.limits };
+  const aiOn = Boolean(deps.config.ai.apiKey && deps.config.ai.model);
+  const autofillPerDay = rateLimit({
+    limit: limits.autofillPerDayPerForm,
+    windowMs: 24 * 60 * 60 * 1000,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    message: { error: "too_many_requests" },
+    keyGenerator: (req) => {
+      const slug = req.params.slug;
+      return typeof slug === "string" ? slug : "";
+    },
+  });
   router.use(emptyQuery);
   async function load(req: Request, res: Response, event = false) {
     const slug = z.string().safeParse(req.params.slug);
@@ -47,10 +61,11 @@ export function publicRouter(deps: AppDeps): Router {
         version: version.version, schema: version.schema,
         settings: {
           theme: settings.theme, showProgress: settings.showProgress,
-          thankYou: settings.thankYou, allowAutofill: settings.allowAutofill,
+          thankYou: settings.thankYou, allowAutofill: settings.allowAutofill && aiOn,
         },
       });
     });
+  router.post("/:slug/autofill", limiter(limits.autofillPer15MinPerForm, 15 * 60_000, true), autofillPerDay, autofillHandler(deps));
   router.post("/:slug/submissions", limiter(limits.submitPer15MinPerForm, 15 * 60_000, true), async (req, res) => {
     const body = submissionZ.safeParse(req.body);
     if (!body.success) { res.status(400).json({ error: "invalid_body" }); return; }

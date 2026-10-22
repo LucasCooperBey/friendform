@@ -199,3 +199,33 @@ Dependency. `@radix-ui/react-popover` 1.1.15 is the popover. `bun add` wrote bot
 Expected value change. `tests/client/FormsPage.test.tsx` "posts a template schema" used to assert `expect(await screen.findByRole("heading", { name: "Edit form" })).toBeInTheDocument()`. The editor title is an input named "Form title", and the page has no "Edit form" heading. The test now mocks `GET /api/forms/form-new` with that template's form detail and asserts `expect(await screen.findByRole("textbox", { name: "Form title" })).toHaveValue(template.title)`. The POST body assertion is unchanged: `{ title: template.title, draftSchema: template.schema }`.
 
 Test sensitivity. Replacing `changedFields` so every save sends `title`, `description`, `draftSchema`, and `settings` makes `tests/client/useDraft.test.tsx` "debounces to one PATCH of only the changed fields" fail. Expected `{ title: "B", description: "More" }`. Received that object plus `draftSchema` and `settings`. The function was restored before the verification run.
+
+## AI features
+
+Both features stay off until `AI_API_KEY` and `AI_MODEL` are set. `AI_BASE_URL` defaults to `https://api.openai.com/v1` and one trailing slash is removed. Any OpenAI-compatible endpoint works, such as OpenAI or a local Ollama. A local server that does not check a key still needs `AI_API_KEY` set to any value, because the client is disabled when the key or the model is missing. There is no AI SDK. `server/ai.ts` posts to `/chat/completions` with `fetch`.
+
+Describe your form is `POST /api/ai/generate-form` for an owner session. The description is the user message. The system prompt names the JSON shape, asks for 3 to 15 questions, and limits conditions to earlier questions and operators from `CONDITION_OPERATORS`. Repair drops unknown question types, replaces missing, invalid, or duplicate ids with `newQuestionId`, drops conditions that point at a missing or later question or use an unknown operator, cuts strings to the schema limits, and then runs `formSchemaZ`. Fill from a document is `POST /api/public/forms/:slug/autofill`. It runs only when the form is published, not closed, `settings.allowAutofill` is true, and AI is enabled. Otherwise the route is 404 `{ error: "not_found" }`, including when AI is off. The file is extracted in memory and is not written to disk or the database. The model output is not logged. Each answer is kept only when its question id is in the published schema and `validateResponses` accepts it on a one-question copy with `required` false and no `conditionalLogic`.
+
+Text extraction uses the installed declarations only. unpdf 1.8.1: `getDocumentProxy` and `extractText` with `{ mergePages: true }`. mammoth 1.13.0: `extractRawText({ buffer })`. `@napi-rs/canvas` is not installed. Bytes over 5 MB are rejected before parsing. The declared type must match the PDF, zip, PNG, JPEG, or WEBP signature. Text types are not signature-checked. Text is cut to 40000 characters.
+
+The autofill path is the only route with `express.json({ limit: "7mb" })`, mounted in `createApp` before the app-wide 512kb parser. A body of about 1 MB reaches autofill. The same body sent to `POST /api/forms` is 413 `payload_too_large`. A decoded file over 5 MB is 413 `file_too_large`, which is separate from the JSON limit. Rate limits: `aiGeneratePerHour` 20 per IP, `autofillPer15MinPerForm` 5 keyed by IP plus slug, and `autofillPerDayPerForm` 200 over 24 hours keyed by slug alone. The day limiter does not read `req.ip`, so express-rate-limit does not reject the key generator.
+
+`aiEnabled` comes from `GET /api/auth/session`. The New form dialog shows "Describe it" only when that flag is true. The settings switch "Let people fill this form from a document" is disabled, with the hint "Set AI_BASE_URL, AI_API_KEY and AI_MODEL to turn this on.", when the flag is false. On a live form with the setting on, "Fill from a document" sits above the first section. A file over 5 MB is refused in the browser. Answers the respondent already typed are replaced only after a confirm dialog. A fill that changes an answer counts as the first input for the start event.
+
+Fixtures. `tests/fixtures/sample.pdf` is a 600 byte PDF 1.4 written by hand: catalog, pages, one page, Helvetica, and a content stream `BT /F1 12 Tf 72 720 Td (Hello from the sample PDF) Tj ET`. `tests/fixtures/sample.docx` was built with `zip` from three XML parts:
+
+```
+mkdir -p /tmp/friendform-docx/word /tmp/friendform-docx/_rels
+```
+
+`[Content_Types].xml` has Defaults for `rels` and `xml`, and an Override for `/word/document.xml` with the wordprocessingml main content type. `_rels/.rels` has Relationship `rId1` of type officeDocument targeting `word/document.xml`. `word/document.xml` is a `w:document` / `w:body` / `w:p` / `w:r` / `w:t` whose text is `Hello from the sample document`. Then:
+
+```
+(cd /tmp/friendform-docx && zip -X -r /Users/lucascooper-bey/Developer/lucface/oss/friendform/tests/fixtures/sample.docx "[Content_Types].xml" _rels word)
+```
+
+`zip -r` also stored the `_rels/` and `word/` directory entries. unpdf reads the PDF as `Hello from the sample PDF`. mammoth reads the docx as `Hello from the sample document` followed by newlines.
+
+Expected value change. `tests/server/public.test.ts` "returns only the public field set..." still publishes the form with `allowAutofill: true`. The public GET now returns `settings.allowAutofill && aiEnabled`. `createTestApp` leaves AI unset, so the expected `settings.allowAutofill` changed from `true` to `false`. The assertion was not removed. A separate test covers AI on: the public GET returns true when the setting is on and false when it is off.
+
+Test sensitivity. Removing `if (type === undefined) continue;` from the generate-form repair made `tests/server/ai.test.ts` "repairs a draft and keeps the description out of the system prompt" fail: expected status 200, received 502. The line was restored before verification.

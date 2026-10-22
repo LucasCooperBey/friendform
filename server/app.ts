@@ -6,6 +6,7 @@ import { log } from "./log";
 import { apiSecurity, securityHeaders } from "./security";
 import { formsRouter } from "./routes/forms";
 import { submissionsRouter } from "./routes/submissions";
+import { aiRouter } from "./routes/ai";
 import { publicRouter } from "./routes/public";
 
 export interface RateLimitSettings {
@@ -13,10 +14,19 @@ export interface RateLimitSettings {
   submitPer15MinPerForm: number;
   eventsPerMinute: number;
   publicReadsPerMinute: number;
+  aiGeneratePerHour: number;
+  autofillPer15MinPerForm: number;
+  autofillPerDayPerForm: number;
 }
 
 export const DEFAULT_LIMITS: RateLimitSettings = {
-  loginPer15Min: 10, submitPer15MinPerForm: 100, eventsPerMinute: 120, publicReadsPerMinute: 120,
+  loginPer15Min: 10,
+  submitPer15MinPerForm: 100,
+  eventsPerMinute: 120,
+  publicReadsPerMinute: 120,
+  aiGeneratePerHour: 20,
+  autofillPer15MinPerForm: 5,
+  autofillPerDayPerForm: 200,
 };
 
 export interface AppDeps {
@@ -77,6 +87,7 @@ export function createApp(deps: AppDeps): express.Express {
   app.set("trust proxy", deps.config.trustProxy);
   app.use(securityHeaders(deps.config));
   app.use("/api", apiSecurity(deps.config));
+  app.use("/api/public/forms/:slug/autofill", express.json({ limit: "7mb" }));
   app.use(express.json({ limit: "512kb" }));
 
   app.get("/api/health", (_req, res) => {
@@ -88,6 +99,7 @@ export function createApp(deps: AppDeps): express.Express {
   });
 
   app.use("/api/auth", authRouter(deps));
+  app.use("/api/ai", aiRouter(deps));
   app.use("/api/forms", formsRouter(deps), submissionsRouter(deps));
   app.use("/api/public/forms", publicRouter(deps));
 

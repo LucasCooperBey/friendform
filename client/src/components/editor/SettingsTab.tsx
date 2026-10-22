@@ -36,7 +36,7 @@ export function SettingsTab({
   settings: FormSettings;
   onSettings: (settings: FormSettings) => void;
 }) {
-  const { publicUrl } = useSession();
+  const { publicUrl, aiEnabled } = useSession();
   const [, setLocation] = useLocation();
   const [slug, setSlug] = useState(form.slug);
   const [slugError, setSlugError] = useState<string | null>(null);
@@ -137,6 +137,22 @@ export function SettingsTab({
             onCheckedChange={(checked) => onSettings({ ...settings, showProgress: checked === true })}
           />
         </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">Fill from a document</h2>
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor="allow-autofill">Let people fill this form from a document</Label>
+          <Switch
+            id="allow-autofill"
+            checked={settings.allowAutofill}
+            disabled={!aiEnabled}
+            onCheckedChange={(checked) => onSettings({ ...settings, allowAutofill: checked === true })}
+          />
+        </div>
+        {aiEnabled ? null : (
+          <p className="text-sm text-muted-foreground">Set AI_BASE_URL, AI_API_KEY and AI_MODEL to turn this on.</p>
+        )}
       </section>
 
       <section className="space-y-3">

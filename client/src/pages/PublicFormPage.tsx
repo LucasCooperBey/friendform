@@ -40,6 +40,7 @@ interface OpenForm {
     theme: ThemePreference;
     showProgress: boolean;
     thankYou: ThankYouSettings;
+    allowAutofill: boolean;
   };
 }
 
@@ -80,6 +81,7 @@ function parseOpen(value: unknown): OpenForm {
       theme: readTheme(value.settings.theme),
       showProgress: value.settings.showProgress !== false,
       thankYou: parseThankYou(value.settings.thankYou),
+      allowAutofill: value.settings.allowAutofill === true,
     },
   };
 }
@@ -238,6 +240,7 @@ export function PublicFormPage() {
         settings: query.data.settings,
       }}
       mode="live"
+      autofillSlug={slug}
       onSubmit={onSubmit}
       onFirstInput={onFirstInput}
     />

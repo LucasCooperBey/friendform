@@ -74,7 +74,7 @@ it("returns only the public field set, 404 before publish, and 410 after close",
   const body = await readJson<PublicForm>(response);
   expect(body).toEqual({
     slug: form.slug, title: "Feedback", description: "Tell us more", version: 1, schema: schemaOf(),
-    settings: { theme: "dark", showProgress: false, thankYou: { title: "Thanks", message: "Saved" }, allowAutofill: true },
+    settings: { theme: "dark", showProgress: false, thankYou: { title: "Thanks", message: "Saved" }, allowAutofill: false },
   });
   const serialized = JSON.stringify(body);
   expect(serialized).not.toContain("hook-secret-path");

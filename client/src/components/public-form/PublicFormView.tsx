@@ -5,7 +5,18 @@ import { validateResponses } from "@shared/validate";
 import { Collapse } from "@/components/public-form/Collapse";
 import { FormProgress } from "@/components/public-form/FormProgress";
 import { QuestionRenderer } from "@/components/public-form/QuestionRenderer";
+import { AutofillButton } from "@/components/public-form/AutofillButton";
 import { ThankYou } from "@/components/public-form/ThankYou";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 
@@ -18,9 +29,11 @@ export interface PublicFormViewProps {
       theme: "light" | "dark" | "system";
       showProgress: boolean;
       thankYou: ThankYouSettings;
+      allowAutofill?: boolean;
     };
   };
   mode: "live" | "preview";
+  autofillSlug?: string;
   onSubmit?: (body: {
     responses: Responses;
     website: string;
@@ -31,6 +44,20 @@ export interface PublicFormViewProps {
 function readResponse(responses: Responses, id: string): ResponseValue | undefined {
   if (!Object.hasOwn(responses, id)) return undefined;
   return responses[id];
+}
+
+function sameValue(left: ResponseValue | undefined, right: ResponseValue | undefined): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((item, index) => item === right[index]);
+  }
+  return false;
+}
+
+function replaceSentence(count: number): string {
+  return count === 1
+    ? "This will replace 1 answer you already entered."
+    : `This will replace ${count} answers you already entered.`;
 }
 
 function focusQuestion(questionId: string) {
@@ -48,14 +75,20 @@ function focusQuestion(questionId: string) {
   });
 }
 
-export function PublicFormView({ form, mode, onSubmit, onFirstInput }: PublicFormViewProps) {
+export function PublicFormView({ form, mode, autofillSlug, onSubmit, onFirstInput }: PublicFormViewProps) {
   const [responses, setResponses] = useState<Responses>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [banner, setBanner] = useState<string | null>(null);
   const [website, setWebsite] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  const [pendingFill, setPendingFill] = useState<Responses | null>(null);
   const started = useRef(false);
+  const responsesRef = useRef(responses);
+  responsesRef.current = responses;
+  const pendingRef = useRef(pendingFill);
+  pendingRef.current = pendingFill;
+  const showAutofill = mode === "live" && autofillSlug !== undefined && form.settings.allowAutofill === true;
 
   const visible = useMemo(() => visibleQuestionIds(form.schema, responses), [form.schema, responses]);
   const visibleQuestions = useMemo(
@@ -69,6 +102,50 @@ export function PublicFormView({ form, mode, onSubmit, onFirstInput }: PublicFor
     if (started.current) return;
     started.current = true;
     onFirstInput?.();
+  }
+
+  function writeResponses(next: Responses) {
+    responsesRef.current = next;
+    setResponses(next);
+  }
+
+  function applyAnswers(incoming: Responses) {
+    const current = responsesRef.current;
+    const next = { ...current };
+    let changed = false;
+    for (const [id, value] of Object.entries(incoming)) {
+      const existing = Object.hasOwn(current, id) ? current[id] : undefined;
+      if (sameValue(existing, value)) continue;
+      next[id] = value;
+      changed = true;
+    }
+    if (!changed) return;
+    noteInput();
+    writeResponses(next);
+  }
+
+  function onFill(incoming: Responses) {
+    const current = responsesRef.current;
+    const safe: Responses = {};
+    const conflicts: Responses = {};
+    for (const [id, value] of Object.entries(incoming)) {
+      const existing = Object.hasOwn(current, id) ? current[id] : undefined;
+      const typed = existing !== undefined && !isEmptyValue(existing);
+      if (typed && !sameValue(existing, value)) conflicts[id] = value;
+      else safe[id] = value;
+    }
+    applyAnswers(safe);
+    if (Object.keys(conflicts).length > 0) {
+      pendingRef.current = conflicts;
+      setPendingFill(conflicts);
+    }
+  }
+
+  function confirmReplace() {
+    const pending = pendingRef.current;
+    pendingRef.current = null;
+    setPendingFill(null);
+    if (pending) applyAnswers(pending);
   }
 
   function update(id: string, value: ResponseValue | undefined) {
@@ -158,6 +235,7 @@ export function PublicFormView({ form, mode, onSubmit, onFirstInput }: PublicFor
                   onChange={(event) => setWebsite(event.target.value)}
                 />
               </div>
+              {showAutofill && autofillSlug ? <AutofillButton slug={autofillSlug} onFill={onFill} /> : null}
               {form.schema.sections.map((section, index) => (
                 <Card key={`${section.title}-${index}`}>
                   <CardHeader>
@@ -187,6 +265,20 @@ export function PublicFormView({ form, mode, onSubmit, onFirstInput }: PublicFor
             </form>
           </div>
         )}
+        <AlertDialog open={pendingFill !== null} onOpenChange={(open) => { if (!open) setPendingFill(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Replace answers you already entered?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {replaceSentence(pendingFill ? Object.keys(pendingFill).length : 0)}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={confirmReplace}>Replace</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         <footer className="mt-10 text-center text-sm text-muted-foreground">
           <a
             href="https://github.com/LucasCooperBey/friendform"

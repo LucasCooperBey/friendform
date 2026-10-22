@@ -37,6 +37,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DescribeFormDialog } from "@/components/DescribeFormDialog";
 
 type FormStatus = "draft" | "published" | "closed";
 
@@ -128,9 +129,10 @@ function TemplateButton({
 }
 
 export function FormsPage() {
-  const { publicUrl } = useSession();
+  const { publicUrl, aiEnabled } = useSession();
   const [, setLocation] = useLocation();
   const [open, setOpen] = useState(false);
+  const [describeOpen, setDescribeOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<FormListItem | null>(null);
   const query = useQuery({
@@ -212,12 +214,27 @@ export function FormsPage() {
                 <span className="font-semibold">Blank form</span>
                 <span className="text-sm text-muted-foreground">Start with an empty form.</span>
               </button>
+              {aiEnabled ? (
+                <button
+                  type="button"
+                  disabled={creating}
+                  onClick={() => {
+                    setOpen(false);
+                    setDescribeOpen(true);
+                  }}
+                  className="flex min-h-24 flex-col items-start gap-1 rounded-lg border bg-card p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                >
+                  <span className="font-semibold">Describe it</span>
+                  <span className="text-sm text-muted-foreground">Tell us what the form is for and get a draft to edit.</span>
+                </button>
+              ) : null}
               {TEMPLATES.map((template) => (
                 <TemplateButton key={template.id} template={template} disabled={creating} onChoose={chooseTemplate} />
               ))}
             </div>
           </DialogContent>
         </Dialog>
+        <DescribeFormDialog open={describeOpen} onOpenChange={setDescribeOpen} />
       </div>
 
       {query.isPending ? (
