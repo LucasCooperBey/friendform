@@ -192,12 +192,13 @@ export function PublicFormView({ form, mode, autofillSlug, onSubmit, onFirstInpu
     event.preventDefault();
     const result = validateResponses(form.schema, responses);
     const unparsedNow = unparsedRef.current;
-    const hasUnparsed = Object.keys(unparsedNow).length > 0;
+    const unparsedVisible = (questionId: string) => visible.has(questionId) && unparsedNow[questionId] === true;
+    const hasUnparsed = Object.keys(unparsedNow).some(unparsedVisible);
     if (!result.ok || hasUnparsed) {
       setErrors(result.ok ? {} : result.errors);
       setBanner("Some answers need attention.");
       const first = allQuestions(form.schema).find(
-        (question) => unparsedNow[question.questionId] === true || (!result.ok && result.errors[question.questionId] !== undefined),
+        (question) => unparsedVisible(question.questionId) || (!result.ok && result.errors[question.questionId] !== undefined),
       );
       if (first) focusQuestion(first.questionId);
       return;
@@ -283,7 +284,7 @@ export function PublicFormView({ form, mode, autofillSlug, onSubmit, onFirstInpu
                           value={readResponse(responses, question.questionId)}
                           onChange={(value) => update(question.questionId, value)}
                           onNumberUnparsed={(flag) => markUnparsed(question.questionId, flag)}
-                          error={unparsed[question.questionId] ? "Enter a number." : errors[question.questionId]}
+                          error={visible.has(question.questionId) && unparsed[question.questionId] ? "Enter a number." : errors[question.questionId]}
                           disabled={submitting}
                         />
                       </Collapse>

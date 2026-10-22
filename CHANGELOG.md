@@ -34,3 +34,6 @@
 - The redirect countdown says how many seconds are left.
 - A number that is not a plain number must be corrected before the form can be submitted.
 - Deleting a form refreshes the form list and drops that form from the cache.
+- A honeypot warning logs a slug that matches the slug pattern, and logs invalid for any other path text.
+- The redirect countdown says "1 second" when one second is left.
+- A hidden question whose number is still unparsed does not block submit, and "Enter a number." is shown only while that question is visible.

@@ -1,7 +1,7 @@
 // source: PublicFormPage renders a published form, conditional questions, validation, and submit states.
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { FormSchema, ThankYouSettings } from "@shared/form-schema";
 import { App } from "@/App";
 import { PublicFormView } from "@/components/public-form/PublicFormView";
@@ -281,5 +281,81 @@ describe("PublicFormPage", () => {
     await user.click(screen.getByRole("button", { name: "Submit" }));
     expect(await screen.findByText("Redirecting in 4 seconds.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Continue now" })).toHaveAttribute("href", "https://example.com/next");
+  });
+
+  // source: the redirect countdown says "1 seconds" when one second is left
+  it("says second when one second is left", async () => {
+    const assign = vi.spyOn(window.location, "assign").mockImplementation(() => undefined);
+    try {
+      const user = userEvent.setup();
+      renderRedirect("live", 2);
+      await user.click(screen.getByRole("button", { name: "Submit" }));
+      expect(screen.getByText("Redirecting in 2 seconds.")).toBeInTheDocument();
+      expect(await screen.findByText("Redirecting in 1 second.", {}, { timeout: 5000 })).toBeInTheDocument();
+    } finally {
+      assign.mockRestore();
+    }
+  });
+
+  // source: an unparsed number on a question conditional logic has hidden still blocks submit, and Enter a number stays on that hidden question
+  it("submits when an unparsed number is on a hidden question", async () => {
+    const posted: unknown[] = [];
+    const user = userEvent.setup();
+    render(
+      <PublicFormView
+        mode="live"
+        onSubmit={async (body) => {
+          posted.push(body);
+          return { ok: true };
+        }}
+        form={{
+          title: "Count form",
+          description: "",
+          schema: {
+            sections: [{
+              title: "About",
+              questions: [
+                {
+                  questionId: "choice",
+                  type: "radio",
+                  prompt: "Include a count",
+                  required: true,
+                  metadata: { options: ["Yes", "No"] },
+                },
+                {
+                  questionId: "count",
+                  type: "number",
+                  prompt: "Count",
+                  required: false,
+                  metadata: {
+                    conditionalLogic: { enabled: true, questionId: "choice", operator: "equals", value: "Yes" },
+                  },
+                },
+              ],
+            }],
+          },
+          settings: {
+            theme: "light",
+            showProgress: false,
+            thankYou: { title: "Thanks", message: "Saved" },
+          },
+        }}
+      />,
+    );
+    await user.click(screen.getByRole("radio", { name: "Yes" }));
+    const count = await screen.findByLabelText("Count");
+    await user.type(count, "5,5");
+    expect(count).toHaveValue("5,5");
+    expect(screen.getByText("Enter a number.")).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "No" }));
+    expect(screen.queryByRole("textbox", { name: "Count" })).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("Enter a number.");
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    expect(await screen.findByText("Saved")).toBeInTheDocument();
+    expect(posted).toHaveLength(1);
+    const body = posted[0];
+    if (!isRecord(body) || !isRecord(body.responses)) throw new Error("missing submission");
+    expect(body).toMatchObject({ responses: { choice: "No" }, website: "" });
+    expect(body.responses).not.toHaveProperty("count");
   });
 });

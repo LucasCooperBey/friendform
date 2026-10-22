@@ -502,3 +502,19 @@ No server was left listening on port 4174 or 3000.
 ### Mutation
 
 Each fix was removed on its own, the guarding test was run, and the file was restored from the bytes taken before the edit. All 17 runs exited 1. The restored files matched those bytes. The full `bun run test` then exited 0: node 29 files, 169 tests; client 13 files, 83 tests.
+
+## Slice 4d: three follow-up fixes
+
+### Honeypot slug log
+
+The honeypot branch of `POST /:slug/submissions` still answers 201 and stores nothing. It logs `{ slug }` only when `req.params.slug` is a string that matches `SLUG_RE` from `shared/slug.ts`. Any other path text is logged as `{ slug: "invalid" }`. Test: "logs an invalid honeypot slug as invalid", a honeypot post to 200 `a` characters followed by `-`. "logs one warning for a honeypot submission and stores nothing" was not edited. Removing the `SLUG_RE` check logged the posted slug, and the new test failed because that line did not contain `invalid`. Exit 1.
+
+### Redirect countdown
+
+`ThankYou` says "Redirecting in 1 second." when `left` is 1, and "Redirecting in N seconds." otherwise. Test: "says second when one second is left". It starts at 2 seconds and waits for the real countdown to reach 1. `window.setTimeout` in this environment is not the global timer `vi.useFakeTimers` replaces, so the test uses the real timer and stubs `location.assign`. "counts a live redirect down in seconds" was not edited and still expects "Redirecting in 4 seconds." Putting the sentence back to "Redirecting in {left} seconds." made the new test unable to find "Redirecting in 1 second." Exit 1.
+
+### Hidden unparsed number
+
+Submit counts an unparsed question only when its id is in the `visible` set, and it uses that same check when choosing the question to focus. "Enter a number." is passed only for a visible question. Test: "submits when an unparsed number is on a hidden question". A choice question shows a number question for one choice. Typing "5,5", then choosing the other choice, then submitting posts `{ responses: { choice: "No" }, website: "" }` with no `count` answer. Counting every unparsed id again left the banner "Some answers need attention." and the test could not find "Saved". Exit 1. Showing "Enter a number." for a hidden question again left that sentence in the page text. Exit 1.
+
+`bun run test` then exited 0: node 29 files, 170 tests; client 13 files, 85 tests.

@@ -4,6 +4,7 @@ import { rateLimit } from "express-rate-limit";
 import express, { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { formSettingsZ } from "../../shared/form-schema";
+import { SLUG_RE } from "../../shared/slug";
 import { validateResponses } from "../../shared/validate";
 import { DEFAULT_LIMITS, type AppDeps } from "../app";
 import { forms, formEvents, submissions, type SubmissionMeta } from "../db/schema";
@@ -80,7 +81,9 @@ export function publicRouter(deps: AppDeps): Router {
     if (!body.success) { res.status(400).json({ error: "invalid_body" }); return; }
     if (body.data.website) {
       const slug = req.params.slug;
-      log.warn("submission_honeypot", { slug: typeof slug === "string" ? slug : "" });
+      log.warn("submission_honeypot", {
+        slug: typeof slug === "string" && SLUG_RE.test(slug) ? slug : "invalid",
+      });
       res.status(201).json({ id: randomUUID() });
       return;
     }

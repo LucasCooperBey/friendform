@@ -34,7 +34,7 @@ export function ThankYou({ settings, mode }: { settings: ThankYouSettings; mode:
       {redirect && mode === "preview" ? <p>People would be sent to {redirect}</p> : null}
       {redirect && mode === "live" ? (
         <div className="space-y-2">
-          <p>Redirecting in {left} seconds.</p>
+          <p>{left === 1 ? "Redirecting in 1 second." : `Redirecting in ${left} seconds.`}</p>
           <a
             href={redirect}
             className="font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

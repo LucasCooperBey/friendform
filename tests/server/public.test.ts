@@ -252,6 +252,28 @@ it("logs one warning for a honeypot submission and stores nothing", async () => 
   }
 });
 
+it("logs an invalid honeypot slug as invalid", async () => {
+  // source: the honeypot branch logs req.params.slug before it matches SLUG_RE, so path text up to the header limit is copied into the log
+  handle = await openTestDb();
+  app = await createTestApp({ db: handle });
+  const slug = `${"a".repeat(200)}-`;
+  const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  try {
+    const bait = await readJson<{ id: string }>(await app.request(`/api/public/forms/${slug}/submissions`, jsonBody({
+      responses: { name: "Ada" }, website: "filled",
+    })), 201);
+    const lines = spy.mock.calls.map((call) => String(call[0])).join("").split("\n")
+      .filter((line) => line.includes("submission_honeypot"));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("warn submission_honeypot");
+    expect(lines[0]).toContain("invalid");
+    expect(lines[0]).not.toContain(slug);
+    expect(await handle.db.select().from(submissions).where(eq(submissions.id, bait.id))).toEqual([]);
+  } finally {
+    spy.mockRestore();
+  }
+});
+
 it("does not deliver an enabled webhook whose URL is empty", async () => {
   // source: an enabled webhook with an empty URL is not sent, and a webhook with a URL still is
   const sink = await listenSink();
