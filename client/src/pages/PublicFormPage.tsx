@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useParams } from "wouter";
 import { formSchemaZ, type FormSchema, type Responses, type ThankYouSettings } from "@shared/form-schema";
 import { ApiError, api, errorMessage } from "@/lib/api";
+import { randomId } from "@/lib/ids";
 import { isRecord } from "@/lib/utils";
 import { useTheme, type ThemePreference } from "@/components/ThemeProvider";
 import { PublicFormView } from "@/components/public-form/PublicFormView";
@@ -18,13 +19,13 @@ function respondentSessionId(slug: string): string {
   try {
     const existing = sessionStorage.getItem(key);
     if (existing && SESSION_RE.test(existing)) return existing;
-    const created = crypto.randomUUID();
+    const created = randomId();
     sessionStorage.setItem(key, created);
     return created;
   } catch {
     const existing = memoryIds.get(slug);
     if (existing) return existing;
-    const created = crypto.randomUUID();
+    const created = randomId();
     memoryIds.set(slug, created);
     return created;
   }

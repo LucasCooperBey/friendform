@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { randomId } from "@/lib/ids";
 
 const WEBHOOK_LIMIT = 10;
 
@@ -168,7 +169,7 @@ export function WebhooksEditor({
         variant="outline"
         disabled={webhooks.length >= WEBHOOK_LIMIT}
         onClick={() =>
-          onChange([...webhooks, { id: crypto.randomUUID(), url: "", format: "json", enabled: true }])
+          onChange([...webhooks, { id: randomId(), url: "", format: "json", enabled: true }])
         }
       >
         Add webhook
