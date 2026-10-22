@@ -344,7 +344,7 @@ The wait is gone in the committed-ready file. `startAiFake` still defaults to po
 
 ### Browser tests
 
-`playwright.config.ts` deletes `.e2e-data/<run id>` and starts `bun run build && node dist/server.mjs` on `127.0.0.1:4173` with the fixed e2e password and session secret. `globalSetup` spawns `bun tests/e2e/global-setup.ts` with `FRIENDFORM_E2E_FAKE=1`, which listens on `127.0.0.1:4180`. `globalTeardown` kills that pid. `vitest.config.ts` was not changed. Its include globs do not match `tests/e2e`.
+`playwright.config.ts` deletes `.e2e-data` in the main process only (workers load the config too, and must not delete the running server's data) and starts `bun run build && node dist/server.mjs` on `127.0.0.1:4173` with the fixed e2e password and session secret. `globalSetup` spawns `bun tests/e2e/global-setup.ts` with `FRIENDFORM_E2E_FAKE=1`, which listens on `127.0.0.1:4180`. `globalTeardown` kills that pid. `vitest.config.ts` was not changed. Its include globs do not match `tests/e2e`.
 
 `scripts/screenshots.ts` uses its own temp data directory and port 4174. The Project intake `reach` condition is added only in that script's cloned schema. The editor PNGs scroll so the comparison value sits in the frame, which shows the condition: controlling question, operator, and value.
 
@@ -372,3 +372,11 @@ One autofill run, started together with `tests/server/ai.test.ts` while the mach
 ### Verification
 
 The verification command exited 0. Node: 28 files, 160 tests. Client: 12 files, 63 tests. `check:boot` and `check:extract` passed. `tsc` reached `Check time: 9.92s` and had 0 `error TS` lines outside `node_modules/`. Playwright: 2 passed.
+
+### Architect changes after the lane
+
+`does not retry a timeout` failed again in a full parallel run at 00:35 PT on 10-22 (213 ms, load about 60 rising), with recording on arrival already in place. The fake runs in the same process as the client, so under load the 150 ms timeout can fire before the fake has seen the request at all, and no server-side recording point can count it. The test now counts the client's fetch calls through `createAiClient`'s `fetchImpl`, which is what "not retried" means, and keeps the elapsed-time bound. With a 300 ms wait at the top of the fake's handler it passed 4 of 4; making the client retry a timeout turns it red (the retry resolves instead of rejecting).
+
+The lane's config wrote a new `.e2e-data/<uuid>` folder on every config load, so the delete before each run never matched an old folder and each run left about 39 MB behind (116 MB after three runs). The config now uses `.e2e-data/server` and clears `.e2e-data` only when `TEST_WORKER_INDEX` is unset. Two runs passed afterwards, and the folder held only `server` and `ai-fake.log` (39 MB).
+
+The architect's full runs at load 270 to 350 failed in a different file each time on 10 and 20 second timeouts (`startup.test.ts`, the `errors.test.ts` setup hook); each passes on a quieter machine. Those are machine load, not code.
