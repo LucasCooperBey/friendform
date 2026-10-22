@@ -46,6 +46,19 @@ it("dedupes view and start events and computes completion from submissions over 
   expect(await readJson(await app.request(events, jsonBody({ type: "view", sessionId: "session-d" })), 404)).toEqual({ error: "not_found" });
 });
 
+it("caps completionRate at 1 when submissions exceed views", async () => {
+  // source: completionRate is submissions divided by views and is never above 1
+  app = await createTestApp();
+  await app.login();
+  const form = await publishForm(app, { title: "Busy" });
+  expect((await app.request(`/api/public/forms/${form.slug}/events`, jsonBody({ type: "view", sessionId: "session-a" }))).status).toBe(204);
+  expect((await app.request(`/api/public/forms/${form.slug}/submissions`, jsonBody({ responses: { name: "Ada" } }))).status).toBe(201);
+  expect((await app.request(`/api/public/forms/${form.slug}/submissions`, jsonBody({ responses: { name: "Bea" } }))).status).toBe(201);
+  expect(await readJson(await app.request(`/api/forms/${form.id}/stats`))).toEqual({
+    views: 1, starts: 0, submissions: 2, completionRate: 1,
+  });
+});
+
 it("limits public events per address", async () => {
   // source: eventsPerMinute returns 429 once the per-address budget is spent.
   app = await createTestApp({ limits: { eventsPerMinute: 2 } });

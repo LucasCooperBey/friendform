@@ -7,6 +7,7 @@ import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { drizzle as drizzlePglite, type PgliteDatabase } from "drizzle-orm/pglite";
 import { migrate as migratePglite } from "drizzle-orm/pglite/migrator";
 import pg from "pg";
+import { log } from "../log";
 import * as schema from "./schema";
 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
@@ -58,12 +59,20 @@ function asDb(db: PgliteDatabase<typeof schema> | NodePgDatabase<typeof schema>)
   return db;
 }
 
+export function createPostgresPool(connectionString: string): pg.Pool {
+  const pool = new pg.Pool({ connectionString });
+  pool.on("error", (err: Error) => {
+    log.error("postgres_pool_error", { message: err.message });
+  });
+  return pool;
+}
+
 export async function openDb(opts: OpenDbOptions): Promise<DbHandle> {
   const migrationsFolder = migrationsFolderOf(opts);
   if ("memory" in opts) return openPglite(undefined, migrationsFolder);
 
   if (opts.databaseUrl) {
-    const pool = new pg.Pool({ connectionString: opts.databaseUrl });
+    const pool = createPostgresPool(opts.databaseUrl);
     const db = drizzlePg(pool, { schema });
     await migratePg(db, { migrationsFolder });
     return {

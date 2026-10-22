@@ -72,11 +72,17 @@ export function formsRouter(deps: AppDeps): Router {
     if (body.data.slug !== undefined && !SLUG_RE.test(body.data.slug)) {
       res.status(400).json({ error: "invalid_slug" }); return;
     }
-    const settings = formSettingsZ.safeParse({ ...current.settings, ...body.data.settings });
-    if (!settings.success) { invalid(res, settings.error, "settings"); return; }
+    const { settings: incomingSettings, ...fields } = body.data;
+    let settings: typeof current.settings | undefined;
+    if (incomingSettings !== undefined) {
+      const parsed = formSettingsZ.safeParse({ ...current.settings, ...incomingSettings });
+      if (!parsed.success) { invalid(res, parsed.error, "settings"); return; }
+      settings = parsed.data;
+    }
     try {
-      const [updated] = await db.update(forms).set({ ...body.data, settings: settings.data, updatedAt: now() })
-        .where(eq(forms.id, current.id)).returning();
+      const [updated] = await db.update(forms).set({
+        ...fields, ...(settings !== undefined ? { settings } : {}), updatedAt: now(),
+      }).where(eq(forms.id, current.id)).returning();
       if (!updated) { res.status(404).json({ error: "not_found" }); return; }
       res.json({ form: await formDetail(db, updated) });
     } catch (error) {
@@ -116,8 +122,9 @@ export function formsRouter(deps: AppDeps): Router {
         formId: current.id, version: (latest?.version ?? 0) + 1, schema: normalizeSchema(draft), publishedAt: now(),
       }).returning();
       if (!version) throw new Error("Version insert returned no row");
-      const [form] = await tx.update(forms).set({ publishedVersionId: version.id, status: "published", updatedAt: now() })
-        .where(eq(forms.id, current.id)).returning();
+      const [form] = await tx.update(forms).set({
+        publishedVersionId: version.id, status: current.status === "closed" ? "closed" : "published", updatedAt: now(),
+      }).where(eq(forms.id, current.id)).returning();
       if (!form) throw new Error("Published form update returned no row");
       return { form, version };
     });
@@ -165,7 +172,10 @@ export function formsRouter(deps: AppDeps): Router {
     const views = events.find((row) => row.type === "view")?.total ?? 0;
     const starts = events.find((row) => row.type === "start")?.total ?? 0;
     const submitted = total?.value ?? 0;
-    res.json({ views, starts, submissions: submitted, completionRate: views === 0 ? null : Math.round(submitted / views * 1000) / 1000 });
+    res.json({
+      views, starts, submissions: submitted,
+      completionRate: views === 0 ? null : Math.min(1, Math.round(submitted / views * 1000) / 1000),
+    });
   });
   router.post("/:id/webhooks/:webhookId/test", emptyBody, async (req, res) => {
     const form = await load(req, res);

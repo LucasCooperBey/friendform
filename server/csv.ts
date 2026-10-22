@@ -1,5 +1,7 @@
+const PLAIN_NUMBER = /^-?\d+(\.\d+)?$/;
+
 export function csvCell(value: string): string {
-  const guarded = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  const guarded = !PLAIN_NUMBER.test(value) && /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
   return /[,"\r\n]/.test(guarded) ? `"${guarded.replace(/"/g, '""')}"` : guarded;
 }
 

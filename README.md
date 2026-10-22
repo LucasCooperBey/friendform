@@ -47,13 +47,17 @@ bun run start
 
 `bun run start` sets `NODE_ENV=production`. With `HOST` unset, the process listens on `0.0.0.0` and port 3000. It reads `.env` from the working directory when that file exists.
 
-Docker Compose builds the image, publishes port 3000, and stores the database on the named volume `friendform-data` mounted at `/data`:
+The Content-Security-Policy and frame protection are sent only when `NODE_ENV` is production, which `bun run start` and the Docker image set.
+
+Docker Compose builds the image, publishes the port from `PORT` (3000 when `PORT` is unset), and stores the database on the named volume `friendform-data` mounted at `/data`:
 
 ```bash
 docker compose up --build
 ```
 
 The image sets `HOST=0.0.0.0`. A `HOST` value in `.env` replaces that, so leave `HOST` unset, or set it to `0.0.0.0`, when you run the container. `docker-compose.yml` includes a commented Postgres service for people who set `DATABASE_URL` instead of the embedded database.
+
+The image runs as the node user (uid 1000). The named volume works as is. A host folder mounted at `/data` must be writable by uid 1000 (for example `chown 1000:1000` on the folder).
 
 ## Configuration
 
@@ -74,6 +78,8 @@ The image sets `HOST=0.0.0.0`. A `HOST` value in `.env` replaces that, so leave 
 | `AI_BASE_URL` | Unset. When AI is on and this is unset, requests go to `https://api.openai.com/v1`. |
 | `AI_API_KEY` | Unset. AI stays off until this and `AI_MODEL` are both set. |
 | `AI_MODEL` | Unset. AI stays off until this and `AI_API_KEY` are both set. |
+
+Sign-in sessions are signed cookies that last 30 days. Signing out clears the cookie in that browser only. Changing `SESSION_SECRET` or `ADMIN_PASSWORD` signs every browser out.
 
 ## AI
 
@@ -96,6 +102,8 @@ Text files are read in the server process. A second PDF or Word file while one i
 ## Webhooks
 
 A webhook runs when someone submits a published form. The request is JSON. The `X-Friendform-Event` header is `submission.created`. When `WEBHOOK_SECRET` is set, `X-Friendform-Signature` is `sha256=<hex HMAC of the body>`.
+
+Webhook URLs can point at any host the server can reach, including private addresses. Only the signed-in owner can set them.
 
 The JSON format looks like this:
 
@@ -126,6 +134,8 @@ With `DATABASE_URL` unset, the embedded database lives under `DATA_DIR` (by defa
 ## Running behind a proxy
 
 Leave `TRUST_PROXY` unset, or set it to `false`, when the app is reached directly. For one reverse proxy, set `TRUST_PROXY=1`. You can also set a whole number from 1 to 10, or a comma-separated list of IP addresses, CIDR ranges, or the names `loopback`, `linklocal`, and `uniquelocal`. The value `true` is rejected, because trusting every hop lets a visitor pick their own address.
+
+Rate limits are per address. Behind a reverse proxy with `TRUST_PROXY` unset, every visitor shares the proxy's address and therefore one set of limits. The server logs a warning when a forwarded address arrives and `TRUST_PROXY` is unset. Set `TRUST_PROXY` as this section describes.
 
 Set `PUBLIC_URL` to the public http or https origin, with no trailing slash, so share links and webhook response links use that origin. Origin checks on writes allow that origin in addition to the host the request arrived on.
 

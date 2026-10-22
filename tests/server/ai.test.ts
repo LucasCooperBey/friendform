@@ -396,6 +396,22 @@ describe("POST /api/ai/generate-form", () => {
     expect(isRecord(fake.requests[1]?.body) && "response_format" in fake.requests[1].body).toBe(false);
   });
 
+  // source: the retry after a 400 sends neither response_format nor temperature
+  it("retries a 400 without temperature or response_format", async () => {
+    const running = await openApp();
+    if (!fake) throw new Error("fake missing");
+    fake.push({ status: 400, rawBody: FORMAT_SENTINEL }, { content: fenced(validDraft("Bare retry")) });
+    await running.login();
+    expect((await readJson<{ title: string }>(await running.request("/api/ai/generate-form", jsonBody({ description: DESCRIPTION })))).title).toBe("Bare retry");
+    expect(fake.requests).toHaveLength(2);
+    const first = fake.requests[0]?.body;
+    const second = fake.requests[1]?.body;
+    expect(isRecord(first) && first.temperature).toBe(0.2);
+    expect(isRecord(first) && first.response_format).toEqual({ type: "json_object" });
+    expect(isRecord(second) && Object.hasOwn(second, "temperature")).toBe(false);
+    expect(isRecord(second) && Object.hasOwn(second, "response_format")).toBe(false);
+  });
+
   // source: aiGeneratePerHour limits generate-form per IP. The blocked request does not call the endpoint.
   it("rate limits generate-form", async () => {
     const running = await openApp({}, { aiGeneratePerHour: 2 });

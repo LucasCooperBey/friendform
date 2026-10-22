@@ -380,3 +380,61 @@ The verification command exited 0. Node: 28 files, 160 tests. Client: 12 files, 
 The lane's config wrote a new `.e2e-data/<uuid>` folder on every config load, so the delete before each run never matched an old folder and each run left about 39 MB behind (116 MB after three runs). The config now uses `.e2e-data/server` and clears `.e2e-data` only when `TEST_WORKER_INDEX` is unset. Two runs passed afterwards, and the folder held only `server` and `ai-fake.log` (39 MB).
 
 The architect's full runs at load 270 to 350 failed in a different file each time on 10 and 20 second timeouts (`startup.test.ts`, the `errors.test.ts` setup hook); each passes on a quieter machine. Those are machine load, not code.
+
+## Slice 4b: review fixes, server and docs
+
+### Idle Postgres errors
+
+`createPostgresPool(connectionString)` in `server/db/index.ts` builds the `pg.Pool` and attaches an `error` listener. The listener logs `postgres_pool_error` through `server/log.ts` with the error message only, so the connection string is not written. `openDb` uses that helper when `databaseUrl` is set. The pool does not connect until a query runs. Test: `tests/server/db-pool.test.ts` "logs an idle pool error without the connection string and stays up". Removing the listener made `pool.listenerCount("error")` return 0. Expected 1.
+
+### Publishing a closed form
+
+Publish sets `status` to `closed` when the form is already closed. A draft or published form still becomes `published`. Test: `tests/server/forms.test.ts` "keeps a closed form closed when publishing another version". With status always `"published"`, the closed publish returned `published`.
+
+### Settings writes
+
+A PATCH writes `settings` only when the body includes `settings`. Other fields are still written when they are present. Test: `tests/server/forms.test.ts` "writes settings only when the patch body includes them". It records the object passed to `set()`. A title-only patch must not have a `settings` key. With the old always-write, `Object.hasOwn` on that key was true.
+
+### CSV numbers
+
+`csvCell` still prefixes a cell that starts with `=`, `+`, `-`, `@`, tab, or carriage return, except a plain decimal number matching `/^-?\d+(\.\d+)?$/`. `tests/server/csv.test.ts` line 15 was `expect(csvCell("-1")).toBe("'-1")` and is now `expect(csvCell("-1")).toBe("-1")`. The same test also expects `"-1.5"` unprefixed, and `"-1+1"`, `"+16195550100"`, and `"+1"` prefixed. Without the number exception, `csvCell("-1")` was `'-1`.
+
+### AI retry after 400
+
+The first attempt still sends `temperature` 0.2 and `response_format`. The retry after status 400 sends neither. Other retries are unchanged. Test: `tests/server/ai.test.ts` "retries a 400 without temperature or response_format". With temperature still sent on that retry, `Object.hasOwn(second, "temperature")` was true. The existing assertion at `tests/server/ai.test.ts` line 296 (`temperature` 0.2 on the first call) was not changed.
+
+### Short session secret
+
+The short-secret sentence now matches the short-password sentence: `SESSION_SECRET must be at least 32 characters. Set a longer value, or run bun run setup --force to replace the password and the session secret.` `loadConfig` still appends a final line `Run bun run setup.` to every `ConfigError`, so `tests/server/config.test.ts` line 66 (`toContain("Run bun run setup.")`) was left unchanged and still passes. A 4-character secret throws:
+
+`SESSION_SECRET must be at least 32 characters. Set a longer value, or run bun run setup --force to replace the password and the session secret.\nRun bun run setup.`
+
+`tests/server/config.test.ts` is not in the file list, so no new assertion was added there. Reverting only this sentence would not fail that test, because the footer still contains `Run bun run setup.`
+
+### Completion rate
+
+`completionRate` is `Math.min(1, submissions / views)` after the existing 3-decimal rounding, and still `null` when views are 0. Test: `tests/server/stats.test.ts` "caps completionRate at 1 when submissions exceed views" (2 submissions, 1 view, expects 1). Without the cap the rate was 2. The earlier assertions in that file were not changed.
+
+### Honeypot log
+
+A submission whose `website` field is non-empty still answers 201 with a random id and stores nothing. That branch now logs one `warn submission_honeypot` line with the form slug. The answers and the honeypot value are not logged. Test: `tests/server/public.test.ts` "logs one warning for a honeypot submission and stores nothing". Without the log call, the filtered stderr lines had length 0. The older public test hits the same branch twice and now prints those two warning lines. Its assertions were not changed.
+
+### Publish checks
+
+A rating compares `(min ?? 1)` with `(max ?? 5)`, the same defaults `shared/validate.ts` uses. A checkbox with `maxSelections` below 1 reports `has a maximum selection count below 1.` Test: `tests/shared/form-schema.test.ts` "rejects a rating whose effective range is empty and a checkbox maximum below 1". A rating with only `min: 7`, a rating with only `max: 1`, and a checkbox with `maxSelections: 0` are reported. A rating with no bounds, and a checkbox maximum of 1, are not. Without the two checks the result was `[]`.
+
+### Docker
+
+The image health check fetches `http://127.0.0.1:` plus `process.env.PORT`, and uses 3000 when `PORT` is unset. `docker-compose.yml` publishes `${PORT:-3000}:${PORT:-3000}`. No test runs Docker. `docker` was not invoked.
+
+### Docs
+
+`README.md` now says rate limits are per address, sessions are signed cookies that last 30 days, webhook URLs may be any host the server can reach, the Content-Security-Policy and frame protection are production-only, and the image runs as uid 1000. `CHANGELOG.md` has one line per user-visible fix under 0.1.0.
+
+### Mutation
+
+The eight code fixes above were removed together (the session-secret sentence was left in place) and this command was run:
+
+`bunx vitest run --project node tests/server/db-pool.test.ts tests/server/forms.test.ts tests/server/csv.test.ts tests/server/ai.test.ts tests/server/stats.test.ts tests/server/public.test.ts tests/shared/form-schema.test.ts tests/server/config.test.ts`
+
+Exit 1. 7 files failed, 1 passed (`tests/server/config.test.ts`). 8 tests failed, 45 passed. The failures were `listenerCount` 0, `csvCell("-1")` returned `'-1`, title patch `settings` was present, closed publish status was `published`, honeypot log lines length 0, `completionRate` 2, publish problems `[]`, and the 400 retry still had `temperature`. The fixes were restored. The same command then exited 0: 8 files, 53 tests.

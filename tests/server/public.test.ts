@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { request as httpRequest } from "node:http";
 import { eq } from "drizzle-orm";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import type { DbHandle } from "../../server/db/index";
 import { submissions } from "../../server/db/schema";
 import type { FormDetail, SubmissionDto } from "../../server/forms-service";
@@ -225,4 +225,29 @@ it("stores only an http referrer origin and cuts the user agent to 300 character
   const rows = await handle.db.select().from(submissions).where(eq(submissions.formId, form.id));
   const bare = rows.find((row) => row.responses.name === "Dee");
   expect(bare?.meta).toEqual({});
+});
+
+it("logs one warning for a honeypot submission and stores nothing", async () => {
+  // source: a filled honeypot answers 201, stores nothing, and logs the slug without the answers or the honeypot value
+  handle = await openTestDb();
+  app = await createTestApp({ db: handle });
+  await app.login();
+  const form = await publishForm(app);
+  const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  try {
+    const bait = await readJson<{ id: string }>(await app.request(`/api/public/forms/${form.slug}/submissions`, jsonBody({
+      responses: { name: "answer-secret-value" }, website: "honeypot-secret-value",
+    })), 201);
+    const lines = spy.mock.calls.map((call) => String(call[0])).join("").split("\n")
+      .filter((line) => line.includes("submission_honeypot"));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("warn submission_honeypot");
+    expect(lines[0]).toContain(form.slug);
+    expect(lines[0]).not.toContain("honeypot-secret-value");
+    expect(lines[0]).not.toContain("answer-secret-value");
+    expect(await handle.db.select().from(submissions).where(eq(submissions.id, bait.id))).toEqual([]);
+    expect(await handle.db.select().from(submissions).where(eq(submissions.formId, form.id))).toEqual([]);
+  } finally {
+    spy.mockRestore();
+  }
 });

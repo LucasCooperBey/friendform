@@ -262,6 +262,38 @@ describe("publishProblems", () => {
       }),
     ).toEqual(['Question 1 in section 1 ("Early") depends on a question that does not appear earlier.']);
   });
+
+  it("rejects a rating whose effective range is empty and a checkbox maximum below 1", () => {
+    // source: publishProblems compares a rating to defaults min 1 and max 5, and rejects maxSelections below 1
+    expect(publishProblems({
+      sections: [{
+        title: "First",
+        questions: [
+          q({ questionId: "ok", type: "rating", prompt: "Ok", required: true }),
+          q({ questionId: "high", type: "rating", prompt: "High", required: true, metadata: { min: 7 } }),
+          q({ questionId: "low", type: "rating", prompt: "Low", required: true, metadata: { max: 1 } }),
+          q({
+            questionId: "boxes",
+            type: "checkbox",
+            prompt: "Boxes",
+            required: true,
+            metadata: { options: ["a", "b"], maxSelections: 0 },
+          }),
+          q({
+            questionId: "picks",
+            type: "checkbox",
+            prompt: "Picks",
+            required: false,
+            metadata: { options: ["a"], maxSelections: 1 },
+          }),
+        ],
+      }],
+    })).toEqual([
+      'Question 2 in section 1 ("High") has a minimum that is not lower than its maximum.',
+      'Question 3 in section 1 ("Low") has a minimum that is not lower than its maximum.',
+      'Question 4 in section 1 ("Boxes") has a maximum selection count below 1.',
+    ]);
+  });
 });
 
 describe("normalizeSchema and newQuestionId", () => {

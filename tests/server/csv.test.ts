@@ -12,7 +12,12 @@ it("guards formula prefixes and quotes cells with the RFC 4180 rules", async () 
   expect(csvCell("hello")).toBe("hello");
   expect(csvCell("=1+1")).toBe("'=1+1");
   expect(csvCell("+1")).toBe("'+1");
-  expect(csvCell("-1")).toBe("'-1");
+  expect(csvCell("-1")).toBe("-1");
+  // source: a plain decimal number is not formula-prefixed; "-1+1" and "+1" stay prefixed
+  expect(csvCell("-1.5")).toBe("-1.5");
+  expect(csvCell("-1+1")).toBe("'-1+1");
+  expect(csvCell("+16195550100")).toBe("'+16195550100");
+  expect(csvCell("+1")).toBe("'+1");
   expect(csvCell("@cmd")).toBe("'@cmd");
   expect(csvCell("\t=1")).toBe("'\t=1");
   expect(csvCell("\r=1")).toBe("\"'\r=1\"");

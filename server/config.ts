@@ -142,7 +142,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (sessionSecret === "") {
     problems.push("SESSION_SECRET is missing. Set it to at least 32 characters, or run bun run setup.");
   } else if (sessionSecret.length < 32) {
-    problems.push("SESSION_SECRET must be at least 32 characters. Run bun run setup.");
+    problems.push(
+      "SESSION_SECRET must be at least 32 characters. Set a longer value, or run bun run setup --force to replace the password and the session secret.",
+    );
   }
 
   const trustProxy = readTrustProxy(env.TRUST_PROXY, problems);

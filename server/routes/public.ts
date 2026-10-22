@@ -78,7 +78,12 @@ export function publicRouter(deps: AppDeps): Router {
   router.post("/:slug/submissions", limiter(limits.submitPer15MinPerForm, 15 * 60_000, true), async (req, res) => {
     const body = submissionZ.safeParse(req.body);
     if (!body.success) { res.status(400).json({ error: "invalid_body" }); return; }
-    if (body.data.website) { res.status(201).json({ id: randomUUID() }); return; }
+    if (body.data.website) {
+      const slug = req.params.slug;
+      log.warn("submission_honeypot", { slug: typeof slug === "string" ? slug : "" });
+      res.status(201).json({ id: randomUUID() });
+      return;
+    }
     const loaded = await load(req, res);
     if (!loaded) return;
     const { form, version } = loaded;

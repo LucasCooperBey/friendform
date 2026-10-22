@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS, emptySchema } from "../../shared/form-schema";
 import * as slugs from "../../shared/slug";
+import type { Db } from "../../server/db/index";
 import type { FormDetail, FormSummary } from "../../server/forms-service";
-import { createTestApp, createForm, jsonBody, readJson, schemaOf, type TestApp } from "./helpers";
+import { openTestDb } from "../helpers/test-db";
+import { createTestApp, createForm, jsonBody, publishForm, readJson, schemaOf, type TestApp } from "./helpers";
 
 let app: TestApp | undefined;
 afterEach(async () => { await app?.close(); app = undefined; vi.restoreAllMocks(); });
@@ -99,4 +101,75 @@ it("returns not_found for invalid and unknown ids on all owner resource routes",
       expect(await readJson(await app.request(`/api/forms/${id}${suffix}`, { method }), 404)).toEqual({ error: "not_found" });
     }
   }
+});
+
+function plainRecord(values: object): Record<string, unknown> {
+  const recorded: Record<string, unknown> = {};
+  for (const key of Object.keys(values)) {
+    const read: unknown = Reflect.get(values, key);
+    recorded[key] = read;
+  }
+  return recorded;
+}
+
+function recordFormUpdates(inner: Db, writes: Array<Record<string, unknown>>): Db {
+  const update: Db["update"] = (table) => {
+    const builder = inner.update(table);
+    const set = builder.set.bind(builder);
+    return new Proxy(builder, {
+      get(builderTarget, builderProp, builderReceiver) {
+        if (builderProp !== "set") return Reflect.get(builderTarget, builderProp, builderReceiver);
+        return (values: Parameters<typeof set>[0]) => {
+          writes.push(plainRecord(values));
+          return set(values);
+        };
+      },
+    });
+  };
+  return new Proxy(inner, {
+    get(target, prop, receiver) {
+      if (prop === "update") return update;
+      const value: unknown = Reflect.get(target, prop, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+it("writes settings only when the patch body includes them", async () => {
+  // source: a PATCH with no settings must not write the settings column, so a later settings change is not undone
+  const handle = await openTestDb();
+  const writes: Array<Record<string, unknown>> = [];
+  app = await createTestApp({ db: { ...handle, db: recordFormUpdates(handle.db, writes) } });
+  await app.login();
+  const form = await createForm(app, { settings: { allowAutofill: true, closedMessage: "Stay closed" } });
+  writes.length = 0;
+  const saved = await readJson<{ form: FormDetail }>(await app.request(`/api/forms/${form.id}`, jsonBody({ title: "Autosaved" }, "PATCH")));
+  expect(saved.form.title).toBe("Autosaved");
+  expect(saved.form.settings.allowAutofill).toBe(true);
+  expect(saved.form.settings.closedMessage).toBe("Stay closed");
+  const titleWrites = writes.filter((values) => values.title === "Autosaved");
+  expect(titleWrites).toHaveLength(1);
+  expect(Object.hasOwn(titleWrites[0] ?? {}, "settings")).toBe(false);
+  writes.length = 0;
+  const themed = await readJson<{ form: FormDetail }>(await app.request(`/api/forms/${form.id}`, jsonBody({ settings: { theme: "dark" } }, "PATCH")));
+  expect(themed.form.settings.theme).toBe("dark");
+  expect(themed.form.settings.allowAutofill).toBe(true);
+  expect(themed.form.settings.closedMessage).toBe("Stay closed");
+  expect(writes.filter((values) => Object.hasOwn(values, "settings"))).toHaveLength(1);
+});
+
+it("keeps a closed form closed when publishing another version", async () => {
+  // source: publishing a closed form keeps status closed, and a draft or published form becomes published
+  app = await createTestApp();
+  await app.login();
+  const form = await publishForm(app);
+  expect(form.status).toBe("published");
+  const again = await readJson<{ form: FormDetail }>(await app.request(`/api/forms/${form.id}/publish`, { method: "POST" }));
+  expect(again.form.status).toBe("published");
+  expect(again.form.publishedVersion).toBe(2);
+  expect((await readJson<{ form: FormDetail }>(await app.request(`/api/forms/${form.id}/close`, { method: "POST" }))).form.status).toBe("closed");
+  const closed = await readJson<{ form: FormDetail; version: { version: number } }>(await app.request(`/api/forms/${form.id}/publish`, { method: "POST" }));
+  expect(closed.form.status).toBe("closed");
+  expect(closed.version.version).toBe(3);
+  expect((await app.request(`/api/public/forms/${form.slug}`)).status).toBe(410);
 });

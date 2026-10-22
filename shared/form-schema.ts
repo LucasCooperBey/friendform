@@ -248,7 +248,7 @@ export function publishProblems(schema: FormSchema): string[] {
         if (outside(min) || outside(max)) {
           problems.push(`${label} has a rating minimum or maximum outside 0 to 10.`);
         }
-        if (min !== undefined && max !== undefined && min >= max) {
+        if ((min ?? 1) >= (max ?? 5)) {
           problems.push(`${label} has a minimum that is not lower than its maximum.`);
         }
       }
@@ -274,6 +274,9 @@ export function publishProblems(schema: FormSchema): string[] {
         }
         if (minSelections !== undefined && minSelections > optionCount) {
           problems.push(`${label} asks for more selections than it has options.`);
+        }
+        if (maxSelections !== undefined && maxSelections < 1) {
+          problems.push(`${label} has a maximum selection count below 1.`);
         }
       }
 

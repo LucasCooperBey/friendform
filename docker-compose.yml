@@ -3,7 +3,7 @@ services:
     build: .
     env_file: .env
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:${PORT:-3000}"
     volumes:
       - friendform-data:/data
     restart: unless-stopped

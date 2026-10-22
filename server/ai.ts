@@ -88,15 +88,18 @@ export function createAiClient(config: Config["ai"], deps?: { fetchImpl?: typeof
   const fetchImpl = deps?.fetchImpl ?? globalThis.fetch;
   const url = chatUrl(config.baseUrl);
 
-  async function attempt(messages: ChatMessage[], includeFormat: boolean, timeoutMs: number): Promise<Attempt> {
+  async function attempt(messages: ChatMessage[], standardBody: boolean, timeoutMs: number): Promise<Attempt> {
     if (apiKey === null || modelName === null) return { kind: "network" };
     const body: {
       model: string;
       messages: ChatMessage[];
-      temperature: number;
+      temperature?: number;
       response_format?: { type: "json_object" };
-    } = { model: modelName, messages, temperature: 0.2 };
-    if (includeFormat) body.response_format = { type: "json_object" };
+    } = { model: modelName, messages };
+    if (standardBody) {
+      body.temperature = 0.2;
+      body.response_format = { type: "json_object" };
+    }
     try {
       const response = await fetchImpl(url, {
         method: "POST",
