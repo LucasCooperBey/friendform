@@ -1,5 +1,7 @@
 # Friendform
 
+[![CI](https://github.com/LucasCooperBey/friendform/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/LucasCooperBey/friendform/actions/workflows/ci.yml)
+
 Friendform is a self-hosted form builder. You build a form, share a link, and collect and export the answers.
 
 ## Screenshots
